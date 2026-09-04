@@ -20,6 +20,12 @@
 
 공개 저장소의 예제·화면·테스트에는 가상 자료만 사용합니다. 운영 자격증명과 실제 고객 자료는 저장소에 포함하지 않습니다.
 
+## 검증 결과
+
+데이터·권한 테스트 **28/28**, 브라우저·API 시나리오 **11/11** 통과. PostgreSQL 17과 Docker에서 컨테이너 교체, DB·첨부 파일 유지, 백업·복구 스크립트까지 확인했습니다.
+
+1차 MVP 자체 평가 **83/100**. [검증 근거·남은 항목](docs/VERIFICATION.md) · [GitHub 자동 검증](https://github.com/happyaspic-byte/Operix/actions/runs/33921994798) · [ERP 비교](docs/COMPARISON.md).
+
 ## 사내 Ubuntu 설치
 
 [설치·업데이트·백업·복구 가이드](docs/DEPLOYMENT.md)를 따르세요.

@@ -22,18 +22,15 @@
     "flaky": 0
   },
   "accessibility": {
-    "pages": [
-      "dashboard",
-      "assets",
-      "contracts",
-      "inspections",
-      "tickets"
-    ],
+    "pages": ["dashboard", "assets", "contracts", "inspections", "tickets"],
     "serious_critical_findings": 0
   },
   "production_dependency_audit": {
     "known_vulnerabilities": 0,
     "scope": "npm audit --omit=dev"
   },
-  "github_postgresql_docker_verification": "pending first CI run"
+  "github_postgresql_docker_verification": {
+    "conclusion": "success",
+    "evidence": "verification-ci.json"
+  }
 }
