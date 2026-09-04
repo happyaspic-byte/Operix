@@ -1,0 +1,9 @@
+node_modules
+.next
+.data
+storage
+test-results
+playwright-report
+docs/screenshots
+package-lock.json
+.env*

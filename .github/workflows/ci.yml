@@ -1,0 +1,116 @@
+name: Operix verification
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: operix-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: operix
+          POSTGRES_PASSWORD: ci-only-postgres-password
+          POSTGRES_DB: operix
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U operix -d operix"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      CI: "true"
+      DATABASE_URL: postgresql://operix:ci-only-postgres-password@127.0.0.1:5432/operix
+      TEST_DATABASE_URL: postgresql://operix:ci-only-postgres-password@127.0.0.1:5432/operix_test
+      RESTORE_DATABASE_URL: postgresql://operix:ci-only-postgres-password@127.0.0.1:5432/operix_restore
+      APP_URL: http://localhost:3000
+      SESSION_SECRET: ci-only-session-secret-never-use-for-production-00001
+      ADMIN_EMAIL: admin@operix.test
+      ADMIN_PASSWORD: CI-only-Operix-password-123!
+      DEMO_PASSWORD: CI-only-Operix-password-123!
+      SEED_DEMO: "1"
+      UPLOAD_DIR: storage/uploads
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=moderate
+      - name: Prepare isolated test database
+        run: docker exec ${{ job.services.postgres.id }} createdb -U operix operix_test
+      - name: Domain and security tests against PostgreSQL
+        run: npm test
+      - run: npm run db:migrate
+      - run: npm run db:seed
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Browser and API verification
+        run: npm run test:e2e
+        env:
+          E2E_START_SERVER: "1"
+      - name: PostgreSQL dump and isolated restore verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/recovery
+          docker exec ${{ job.services.postgres.id }} pg_dump -U operix -d operix -Fc > test-results/recovery/database.dump
+          docker exec ${{ job.services.postgres.id }} createdb -U operix operix_restore
+          docker exec -i ${{ job.services.postgres.id }} pg_restore -U operix -d operix_restore --no-owner --exit-on-error < test-results/recovery/database.dump
+          node scripts/verify-restore.mjs
+          tar -czf test-results/recovery/storage.tar.gz -C storage .
+          mkdir test-results/recovery/files
+          tar -xzf test-results/recovery/storage.tar.gz -C test-results/recovery/files
+          diff -r storage test-results/recovery/files
+          rm test-results/recovery/database.dump test-results/recovery/storage.tar.gz
+          rm -rf test-results/recovery/files
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operix-verification
+          path: |
+            test-results/e2e-results.json
+            test-results/accessibility.json
+            test-results/screenshots
+            test-results/sample-report.pdf
+            playwright-report
+          retention-days: 14
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create disposable container configuration
+        shell: bash
+        run: |
+          cat > .env <<'ENV'
+          APP_URL=http://localhost:3000
+          SESSION_SECRET=ci-only-container-secret-not-for-production-000001
+          POSTGRES_PASSWORD=ci-only-container-database-password
+          ADMIN_EMAIL=admin@operix.test
+          ADMIN_PASSWORD=CI-only-container-password-123!
+          SEED_DEMO=0
+          OPERIX_IMAGE_TAG=ci
+          ENV
+      - run: docker compose up --build --wait --wait-timeout 180
+      - name: Container health and authentication
+        run: |
+          curl --fail http://localhost:3000/api/health
+          curl --fail -c /tmp/operix-cookies -H 'Origin: http://localhost:3000' -H 'Content-Type: application/json' --data '{"email":"admin@operix.test","password":"CI-only-container-password-123!"}' http://localhost:3000/api/auth/login
+          curl --fail -b /tmp/operix-cookies http://localhost:3000/api/data/assets
+      - name: Container diagnostics
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop disposable containers
+        if: always()
+        run: docker compose down -v

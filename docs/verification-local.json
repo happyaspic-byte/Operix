@@ -1,0 +1,39 @@
+{
+  "tested_at_utc": "2026-09-04T21:34:17.374Z",
+  "environment": {
+    "node": "24.19.0",
+    "database": "PGlite 0.5.8 (local only)",
+    "browser": "Chromium 149, Linux",
+    "desktop": "1440x1040",
+    "mobile": "390x844"
+  },
+  "build": "passed",
+  "typecheck": "passed",
+  "domain_security_tests": {
+    "passed": 28,
+    "failed": 0
+  },
+  "browser_api_tests": {
+    "startTime": "2026-09-04T21:34:17.374Z",
+    "duration": 23554.91,
+    "expected": 11,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "accessibility": {
+    "pages": [
+      "dashboard",
+      "assets",
+      "contracts",
+      "inspections",
+      "tickets"
+    ],
+    "serious_critical_findings": 0
+  },
+  "production_dependency_audit": {
+    "known_vulnerabilities": 0,
+    "scope": "npm audit --omit=dev"
+  },
+  "github_postgresql_docker_verification": "pending first CI run"
+}
