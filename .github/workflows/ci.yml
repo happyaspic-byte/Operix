@@ -90,6 +90,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - name: Create disposable container configuration
         shell: bash
         run: |
@@ -108,6 +111,23 @@ jobs:
           curl --fail http://localhost:3000/api/health
           curl --fail -c /tmp/operix-cookies -H 'Origin: http://localhost:3000' -H 'Content-Type: application/json' --data '{"email":"admin@operix.test","password":"CI-only-container-password-123!"}' http://localhost:3000/api/auth/login
           curl --fail -b /tmp/operix-cookies http://localhost:3000/api/data/assets
+      - name: Container replacement preserves database and attachments
+        env:
+          OPERIX_CONTAINER_TEST: "1"
+        run: |
+          node --env-file=.env scripts/verify-container.mjs prepare
+          docker compose up -d --force-recreate web worker
+          node --env-file=.env scripts/verify-container.mjs verify
+      - name: Backup and restore scripts recover the expected state
+        env:
+          OPERIX_CONTAINER_TEST: "1"
+        run: |
+          bash scripts/backup.sh /tmp/operix-ci-backups
+          node --env-file=.env scripts/verify-container.mjs mutate
+          for backup_dir in /tmp/operix-ci-backups/operix-*; do
+            CONFIRM_RESTORE=YES bash scripts/restore.sh "$backup_dir"
+          done
+          node --env-file=.env scripts/verify-container.mjs verify
       - name: Container diagnostics
         if: failure()
         run: docker compose logs --no-color
