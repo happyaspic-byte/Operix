@@ -52,11 +52,11 @@
 
 | 화면      | 캡처                                                         |
 | --------- | ------------------------------------------------------------ |
-| 로그인    | [로그인 화면](screenshots/login.jpg)                         |
-| 대시보드  | [데스크톱 대시보드](screenshots/dashboard-desktop.jpg)       |
-| 자산 관리 | [검색·필터·열 설정·가져오기](screenshots/assets-desktop.jpg) |
-| 모바일    | [모바일 대시보드](screenshots/dashboard-mobile.jpg)          |
-| 보고서    | [확정 보고서](screenshots/report.jpg)                        |
+| 로그인    | [로그인 화면](https://github.com/happyaspic-byte/Operix/blob/0bf3d370d021210dac369dbaf787e071ce10a3af/docs/screenshots/login.jpg)                         |
+| 대시보드  | [데스크톱 대시보드](https://github.com/happyaspic-byte/Operix/blob/0bf3d370d021210dac369dbaf787e071ce10a3af/docs/screenshots/dashboard-desktop.jpg)       |
+| 자산 관리 | [검색·필터·열 설정·가져오기](https://github.com/happyaspic-byte/Operix/blob/0bf3d370d021210dac369dbaf787e071ce10a3af/docs/screenshots/assets-desktop.jpg) |
+| 모바일    | [모바일 대시보드](https://github.com/happyaspic-byte/Operix/blob/0bf3d370d021210dac369dbaf787e071ce10a3af/docs/screenshots/dashboard-mobile.jpg)          |
+| 보고서    | [확정 보고서](https://github.com/happyaspic-byte/Operix/blob/0bf3d370d021210dac369dbaf787e071ce10a3af/docs/screenshots/report.jpg)                        |
 
 화면에는 예제 고객과 자동 테스트가 생성한 자료가 함께 나타날 수 있다. 대시보드 수치는 해당 시점 DB에서 집계한 값이다. 이미지를 생성하거나 집계 수치를 합성하지 않았다.
 
@@ -66,4 +66,4 @@
 
 사용자 수·자산 수에 따른 성능 산정과 회사 양식의 긴 내용·사진·여러 페이지 출력 확인도 필요하다. 현재 PDF는 브라우저 인쇄 방식이며 첨부는 보고서에서 파일 링크로 제공한다. 외부 메일·메신저 알림, 악성코드 검사 연동, SSO/MFA와 영업·구매·재고·회계·인사는 후속 범위다.
 
-설치 방법은 [운영 가이드](DEPLOYMENT.md), 기성 ERP의 공식 기능 문서와 비교한 결과는 [ERP 비교](COMPARISON.md)에 정리했다.
+설치 방법은 [운영 가이드](https://github.com/happyaspic-byte/Operix/blob/0bf3d370d021210dac369dbaf787e071ce10a3af/docs/DEPLOYMENT.md), 기성 ERP의 공식 기능 문서와 비교한 결과는 [ERP 비교](https://github.com/happyaspic-byte/Operix/blob/0bf3d370d021210dac369dbaf787e071ce10a3af/docs/COMPARISON.md)에 정리했다.

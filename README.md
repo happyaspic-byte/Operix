@@ -26,6 +26,8 @@
 
 문서 기밀등급/ClamAV 격리, 개인정보 보유·파기와 복구 후 재적용, 접속기록 점검, 본인 비밀번호/세션 관리, 인수인계, SLA·주월 일정·후속 티켓, 다중 고객 담당자, 필터 내보내기와 확대된 가져오기를 제공합니다.
 
+**자동 검증 63/63 + 16/16 통과.** 개선안 대응 점수는 공개 산식 기준 **68.2/100**이며 보안 인증이나 ERP 완성도 점수가 아닙니다.
+
 [33개 개선 추적표](docs/IMPROVEMENTS-2026-09-05.md) · [실행 결과·점수·화면](docs/VERIFICATION.md) · [자동 검증](https://github.com/happyaspic-byte/Operix/actions/workflows/ci.yml) · [ERP 비교](docs/COMPARISON.md).
 
 회사별 개인정보 정책·MFA/IdP·HTTPS/VPN·외부 로그/백업·RPO/RTO 및 현장 인수는 남아 있습니다. 완료 항목 수는 전사 ERP 완성도나 운영 승인 점수가 아닙니다.

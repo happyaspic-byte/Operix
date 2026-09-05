@@ -92,7 +92,11 @@ export function SecurityReview() {
             <tbody>
               {data.rows.map((r) => (
                 <tr key={r.id}>
-                  <td>{new Date(r.occurred_at).toLocaleString("ko-KR")}</td>
+                  <td>
+                    {new Date(r.occurred_at).toLocaleString("ko-KR", {
+                      timeZone: "Asia/Seoul",
+                    })}
+                  </td>
                   <td className="mono">
                     {r.user_id?.slice(0, 8) || "비로그인"}
                   </td>
@@ -107,8 +111,12 @@ export function SecurityReview() {
                       </details>
                     )}
                   </td>
-                  <td>{r.outcome}</td>
-                  <td>{r.client_address}</td>
+                  <td>{r.outcome === "allowed" ? "허용" : "거부"}</td>
+                  <td>
+                    {r.client_address === "unknown"
+                      ? "확인 불가"
+                      : r.client_address}
+                  </td>
                   <td>{r.reason || "—"}</td>
                 </tr>
               ))}

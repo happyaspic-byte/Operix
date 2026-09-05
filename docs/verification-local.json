@@ -48,7 +48,7 @@
     },
     {
       "path": "docs/screenshots/hardening-account.jpg",
-      "sha256": "5997c00cfa8d9bd51b555e860ad42a2d4e8657692c9c23d9bb88d73eaf06f0a4"
+      "sha256": "4a7084f5881b8f5bb477aae76c464d261f5c377e12cef86ccff8b23e27eb42b5"
     },
     {
       "path": "docs/screenshots/hardening-calendar.jpg",
@@ -60,11 +60,11 @@
     },
     {
       "path": "docs/screenshots/hardening-security.jpg",
-      "sha256": "44fb42ea4023a0eb2c4af318ff4c2a306a6e349586fe53386320dc4a3f46c513"
+      "sha256": "f219a7e9d33c0f2b0ac701257dfee1be1119e489aa97d87fd13c0fd457590d73"
     },
     {
       "path": "docs/screenshots/hardening-settings.jpg",
-      "sha256": "21c1737ecabd050d44155185bdedc17ccc83da0b9d0efefcecf7a1dbf66eff64"
+      "sha256": "474c466c61bfa67cad72509802d47620fe7d4d34113bcc66c221c60daa0dcce8"
     },
     {
       "path": "docs/screenshots/login.jpg",
@@ -74,5 +74,18 @@
       "path": "docs/screenshots/report.jpg",
       "sha256": "af78eaf946fcc78883eadef2d8a8786883378ded0cdefe1e1f870fff6f5f45b0"
     }
-  ]
+  ],
+  "supplementary_browser_check": {
+    "scope": "KST timestamp and access-log rendering after the full 16-scenario run",
+    "passed": 1,
+    "failed": 0,
+    "pages": [
+      "documents",
+      "calendar",
+      "account",
+      "settings",
+      "security"
+    ],
+    "serious_critical_axe_findings": 0
+  }
 }

@@ -143,6 +143,7 @@ jobs:
           bash scripts/backup.sh /tmp/operix-ci-backups
           node --env-file=.env scripts/verify-container.mjs mutate
           for backup_dir in /tmp/operix-ci-backups/operix-*; do
+            bash scripts/verify-recovery-failure.sh "$backup_dir"
             CONFIRM_RESTORE=YES bash scripts/restore.sh "$backup_dir"
           done
           node --env-file=.env scripts/verify-container.mjs verify

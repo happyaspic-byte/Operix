@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "finding_response_score": {
+    "score": 68.2,
+    "formula": "100 * (complete + 0.5 * partial) / total",
+    "complete": 13,
+    "partial": 19,
+    "deferred": 1,
+    "total": 33,
+    "points": 22.5,
+    "equal_weight": true,
+    "scope": "Issue response progress; not security assurance, production readiness, code coverage or competitor ranking"
+  },
+  "regression_pass_rate": {
+    "score": 100,
+    "domain": {
+      "passed": 63,
+      "total": 63
+    },
+    "browser": {
+      "passed": 16,
+      "total": 16
+    },
+    "scope": "Distinct scenario counts, not summed across execution environments"
+  }
+}

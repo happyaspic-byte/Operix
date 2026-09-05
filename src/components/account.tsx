@@ -108,7 +108,9 @@ export function Account() {
                 </strong>
                 <small>
                   {s.user_agent || "기기 정보 없음"} · 최근 사용{" "}
-                  {new Date(s.last_seen_at).toLocaleString("ko-KR")}
+                  {new Date(s.last_seen_at).toLocaleString("ko-KR", {
+                    timeZone: "Asia/Seoul",
+                  })}
                 </small>
               </div>
               <button
