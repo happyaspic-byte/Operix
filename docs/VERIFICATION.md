@@ -2,7 +2,7 @@
 
 2026-09-05, 가상 자료로 검증했다. **도메인 63/63·브라우저 16/16 통과**, 실제 PostgreSQL 17·Docker·ClamAV·암호화 백업/복구 검증에 성공했다.
 
-첫 전체 실행: [GitHub Actions #3](https://github.com/happyaspic-byte/Operix/actions/runs/33948162707), 구현 커밋 [288c551](https://github.com/happyaspic-byte/Operix/commit/288c551c01aa4145b9db6ce7713306348f959790). application·container 작업 모두 성공. 이후 KST 표시와 복구 실패 주입 보완의 최종 CI 결과는 아래에 추가한다.
+첫 전체 실행: [GitHub Actions #3](https://github.com/happyaspic-byte/Operix/actions/runs/33948162707), 구현 커밋 [288c551](https://github.com/happyaspic-byte/Operix/commit/288c551c01aa4145b9db6ce7713306348f959790). application·container 작업 모두 성공. 최종 구현 검증: [GitHub Actions #8](https://github.com/happyaspic-byte/Operix/actions/runs/33948373808), 커밋 [eb60e1f](https://github.com/happyaspic-byte/Operix/commit/eb60e1f4554812b8a891aacaf635c4cf28b7afda). application·container 모두 성공했으며 KST 표시와 복구 실패 주입 검증을 포함한다. 이후 커밋은 이 결과 문서만 갱신한다.
 
 ## 결과와 근거
 
@@ -19,7 +19,7 @@
 | 암호화 배포 백업/복원 | 통과 | age 암복호화, 새 파일 볼륨, DB/파일 manifest·SHA-256 확인 |
 | 백업 이후 파일·파기 | 통과 | 추가 파일 404, 개인정보 익명화 재적용 및 파기 첨부 410 |
 | worker 중단 | 통과 | heartbeat 지연 시 readiness 503 |
-| 복구 실패 주입 | 최종 CI 확인 중 | 다른 스키마 거부, 잘못된 manifest 거부와 쓰기 서비스 정지 유지 |
+| 복구 실패 주입 | 통과 | 다른 스키마 거부, 잘못된 manifest 거부와 쓰기 서비스 정지 유지 |
 
 [로컬 JSON](verification-local.json) · [CI JSON](verification-ci.json) · [점수 산식 JSON](evaluation.json)
 
@@ -52,7 +52,7 @@ v0.1의 주관적 83점 평가는 [과거 기록](history/v0.1/VERIFICATION.md)�
 
 ## 성능 측정 범위
 
-합성 자산 1천 건, 예열된 조건의 순차 서비스 조회 20회에서 CI PostgreSQL p95 **6.06ms**, 최대 **6.26ms**를 기록했다. 로컬 PGlite는 p95 **9.54ms**, 최대 **16.54ms**였다. HTTP 전체 응답·동시 사용자·PDF/대형 첨부·콜드 캐시·메모리 부하의 측정은 아니다.
+합성 자산 1천 건, 예열된 조건의 순차 서비스 조회 20회에서 최종 CI PostgreSQL p95 **6.34ms**, 최대 **6.87ms**를 기록했다. 로컬 PGlite는 p95 **9.54ms**, 최대 **16.54ms**였다. HTTP 전체 응답·동시 사용자·PDF/대형 첨부·콜드 캐시·메모리 부하의 측정은 아니다.
 
 관계 무결성을 위한 업무 쓰기 전역 잠금이 있으므로 높은 동시 쓰기에서는 처리량이 제한될 수 있다. 실자료 규모의 EXPLAIN, p95·메모리·동시 부하와 비동기 내보내기는 후속 검증 대상이다. 이 수치로 운영 용량이나 타 ERP보다 빠르다는 주장을 하지 않는다.
 
