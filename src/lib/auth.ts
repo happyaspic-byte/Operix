@@ -5,8 +5,9 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { sealData, unsealData } from "iron-session";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { getDb, type Database } from "./db";
+import { connectionInfo } from "./security";
 import { AppError, type Role } from "./policy";
 export type User = {
   id: string;
@@ -14,6 +15,9 @@ export type User = {
   name: string;
   role: Role;
   active: boolean;
+  must_change_password?: boolean;
+  session_id?: string;
+  session_expires_at?: string;
 };
 export const COOKIE = "operix_session";
 const TTL = 8 * 60 * 60;
@@ -46,17 +50,25 @@ export async function verifyPassword(password: string, hash: string) {
   const result = await scrypt(password, salt);
   return stored.length === result.length && timingSafeEqual(stored, result);
 }
-export async function createSession(userId: string) {
+export async function createSession(userId: string, request?: Request) {
   const token = randomBytes(32).toString("hex");
-  const db = await getDb();
+  const db = await getDb(),
+    context = await connectionInfo(request);
   await db.query(
-    "INSERT INTO sessions(id,user_id,expires_at) VALUES ($1,$2,$3)",
-    [digest(token), userId, new Date(Date.now() + TTL * 1000)],
+    "INSERT INTO sessions(id,user_id,expires_at,client_address,user_agent) VALUES ($1,$2,$3,$4,$5)",
+    [
+      digest(token),
+      userId,
+      new Date(Date.now() + TTL * 1000),
+      context.address,
+      context.agent,
+    ],
   );
   return sealData({ token }, { password: secret(), ttl: TTL });
 }
 export async function resolveSession(
   cookie: string | undefined,
+  touch = true,
 ): Promise<User | null> {
   if (!cookie) return null;
   try {
@@ -68,8 +80,15 @@ export async function resolveSession(
     const [user] = await (
       await getDb()
     ).query(
-      "SELECT u.id,u.email,u.name,u.role,u.active FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.expires_at>now() AND u.active=true",
-      [digest(data.token)],
+      "UPDATE sessions s SET last_seen_at=CASE WHEN $3 THEN now() ELSE s.last_seen_at END FROM users u WHERE u.id=s.user_id AND s.id=$1 AND s.expires_at>now() AND u.active=true AND s.last_seen_at>now()-($2::int*interval '1 minute') RETURNING u.id,u.email,u.name,u.role,u.active,u.must_change_password,s.id session_id,s.expires_at session_expires_at",
+      [
+        digest(data.token),
+        Math.max(
+          5,
+          Math.min(480, Number(process.env.SESSION_IDLE_MINUTES) || 30),
+        ),
+        touch,
+      ],
     );
     return (user as User) || null;
   } catch {
@@ -77,11 +96,16 @@ export async function resolveSession(
   }
 }
 export async function currentUser() {
-  return resolveSession((await cookies()).get(COOKIE)?.value);
+  return resolveSession(
+    (await cookies()).get(COOKIE)?.value,
+    (await headers()).get("x-operix-background") !== "1",
+  );
 }
-export async function requireUser() {
+export async function requireUser(allowPasswordChange = false) {
   const user = await currentUser();
   if (!user) throw new AppError(401, "로그인이 필요합니다.");
+  if (user.must_change_password && !allowPasswordChange)
+    throw new AppError(403, "초기 비밀번호를 먼저 변경해 주세요.");
   return user;
 }
 export async function revokeSession(cookie: string | undefined) {
@@ -110,33 +134,44 @@ export function assertOrigin(request: Request) {
   if (request.headers.get("origin") !== new URL(expected).origin)
     throw new AppError(403, "허용되지 않은 요청 출처입니다.");
 }
-export async function attemptLogin(email: string, password: string) {
-  const db = await getDb();
-  const key = digest(email.toLowerCase());
+export async function attemptLogin(
+  email: string,
+  password: string,
+  request?: Request,
+) {
+  const db = await getDb(),
+    context = await connectionInfo(request);
+  const account = digest(email.toLowerCase()),
+    source = digest(context.address);
+  const limits: [string, number][] = [
+    ["global", 600],
+    ["source:" + source, 120],
+    ["pair:" + account + ":" + source, 5],
+  ];
+  // Different source addresses do not consume the same account lockout bucket.
   await db.transaction(async (tx) => {
-    await tx.query(
-      "INSERT INTO login_attempts(id) VALUES ($1) ON CONFLICT DO NOTHING",
-      [key],
-    );
-    const [rate] = await tx.query(
-      "SELECT * FROM login_attempts WHERE id=$1 FOR UPDATE",
-      [key],
-    );
-    const recent =
-      Date.now() - new Date(rate.window_start).getTime() < 15 * 60 * 1000;
-    if (recent && rate.attempts >= 5)
-      throw new AppError(
-        429,
-        "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요.",
+    for (const [key, maximum] of limits) {
+      await tx.query(
+        "INSERT INTO login_attempts(id) VALUES ($1) ON CONFLICT DO NOTHING",
+        [key],
       );
-    await tx.query(
-      "UPDATE login_attempts SET attempts=$2,window_start=$3 WHERE id=$1",
-      [
-        key,
-        recent ? rate.attempts + 1 : 1,
-        recent ? rate.window_start : new Date(),
-      ],
-    );
+      const [rate] = await tx.query(
+        "SELECT * FROM login_attempts WHERE id=$1 FOR UPDATE",
+        [key],
+      );
+      const recent =
+        Date.now() - new Date(rate.window_start).getTime() < 15 * 60 * 1000;
+      if (recent && rate.attempts >= maximum)
+        throw new AppError(
+          429,
+          "로그인 시도가 많습니다. 잠시 후 다시 시도해 주세요.",
+        );
+    }
+    for (const [key] of limits)
+      await tx.query(
+        "UPDATE login_attempts SET attempts=CASE WHEN window_start>now()-interval '15 minutes' THEN attempts+1 ELSE 1 END,window_start=CASE WHEN window_start>now()-interval '15 minutes' THEN window_start ELSE now() END WHERE id=$1",
+        [key],
+      );
   });
   const [user] = await db.query("SELECT * FROM users WHERE email=$1", [
     email.toLowerCase(),
@@ -145,7 +180,7 @@ export async function attemptLogin(email: string, password: string) {
   const ok = await verifyPassword(password, user?.password_hash || dummy);
   if (!user || !user.active || !ok)
     throw new AppError(401, "이메일 또는 비밀번호가 올바르지 않습니다.");
-  await db.query("DELETE FROM login_attempts WHERE id=$1", [key]);
+  await db.query("DELETE FROM login_attempts WHERE id=$1", [limits[2][0]]);
   return user as User;
 }
 export async function audit(

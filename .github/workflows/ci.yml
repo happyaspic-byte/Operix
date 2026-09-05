@@ -26,6 +26,8 @@ jobs:
           --health-interval 5s --health-timeout 3s --health-retries 20
     env:
       CI: "true"
+      FILE_SCAN_MODE: test
+      SECURITY_LOG_DIR: storage/security
       DATABASE_URL: postgresql://operix:ci-only-postgres-password@127.0.0.1:5432/operix
       TEST_DATABASE_URL: postgresql://operix:ci-only-postgres-password@127.0.0.1:5432/operix_test
       RESTORE_DATABASE_URL: postgresql://operix:ci-only-postgres-password@127.0.0.1:5432/operix_restore
@@ -48,6 +50,8 @@ jobs:
         run: npm audit --omit=dev --audit-level=moderate
       - name: Prepare isolated test database
         run: docker exec ${{ job.services.postgres.id }} createdb -U operix operix_test
+      - name: Explicit type and static checks
+        run: npm run typecheck && npm run lint
       - name: Domain and security tests against PostgreSQL
         run: npm test
       - run: npm run db:migrate
@@ -78,11 +82,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: operix-verification
+          include-hidden-files: true
           path: |
             test-results/e2e-results.json
             test-results/accessibility.json
             test-results/screenshots
             test-results/sample-report.pdf
+            .data/performance.json
             playwright-report
           retention-days: 14
   container:
@@ -104,8 +110,13 @@ jobs:
           ADMIN_PASSWORD=CI-only-container-password-123!
           SEED_DEMO=0
           OPERIX_IMAGE_TAG=ci
+          OPERIX_CONTAINER_TEST=1
+          FILE_SCAN_MODE=clamav
+          SECURITY_LOG_KEY=ci-only-independent-security-signing-key-not-for-production-0002
           ENV
-      - run: docker compose up --build --wait --wait-timeout 180
+      - run: docker compose up --build --wait --wait-timeout 300
+      - name: Wait for virus scanner
+        run: docker compose exec -T scanner clamdscan --ping=120:2
       - name: Container health and authentication
         run: |
           curl --fail http://localhost:3000/api/health
@@ -118,6 +129,13 @@ jobs:
           node --env-file=.env scripts/verify-container.mjs prepare
           docker compose up -d --force-recreate web worker
           node --env-file=.env scripts/verify-container.mjs verify
+      - name: Prepare disposable backup encryption identity
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          age-keygen -o /tmp/operix-backup-identity
+          echo "BACKUP_AGE_RECIPIENT=$(age-keygen -y /tmp/operix-backup-identity)" >> "$GITHUB_ENV"
+          echo "BACKUP_AGE_IDENTITY=/tmp/operix-backup-identity" >> "$GITHUB_ENV"
       - name: Backup and restore scripts recover the expected state
         env:
           OPERIX_CONTAINER_TEST: "1"
@@ -131,6 +149,12 @@ jobs:
       - name: Container diagnostics
         if: failure()
         run: docker compose logs --no-color
+      - name: Worker failure degrades readiness
+        run: |
+          docker compose stop worker
+          docker compose exec -T db psql -U operix -d operix -c "UPDATE job_runs SET last_success=now()-interval '10 minutes' WHERE id='worker'"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/health)" = 503
+          docker compose start worker
       - name: Stop disposable containers
         if: always()
         run: docker compose down -v

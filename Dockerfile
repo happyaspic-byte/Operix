@@ -23,7 +23,7 @@ COPY --from=build --chown=node:node /app/src/lib ./src/lib
 COPY --from=build --chown=node:node /app/scripts ./scripts
 COPY --from=build --chown=node:node /app/db ./db
 COPY --from=build --chown=node:node /app/tsconfig.json ./tsconfig.json
-RUN mkdir -p /app/storage/uploads && chown -R node:node /app/storage
+RUN mkdir -p /app/storage/uploads /app/storage/security && chown -R node:node /app/storage
 USER node
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["node", "--import", "./scripts/runtime-guard.mjs", "server.js"]

@@ -7,10 +7,23 @@ x-app: &app
     DATABASE_URL: postgresql://operix:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/operix
     OPERIX_EMBEDDED: "0"
     UPLOAD_DIR: /app/storage/uploads
+    SECURITY_LOG_DIR: /app/storage/security
+    WORKER_REQUIRED: "1"
+    FILE_SCAN_MODE: ${FILE_SCAN_MODE:-clamav}
+    CLAMD_HOST: scanner
   volumes:
-    - uploads:/app/storage
+    - uploads:/app/storage/uploads
+    - security:/app/storage/security
   init: true
 services:
+  scanner:
+    image: clamav/clamav:1.4
+    entrypoint: ["/bin/sh", "/operix-scanner.sh"]
+    restart: unless-stopped
+    volumes:
+      - scanner:/var/lib/clamav
+      - ./deploy/scanner-entrypoint.sh:/operix-scanner.sh:ro
+    mem_limit: 4g
   db:
     image: postgres:17-bookworm
     environment:
@@ -31,7 +44,7 @@ services:
       [
         "sh",
         "-c",
-        "node --import tsx scripts/migrate.ts && node --import tsx scripts/seed.ts",
+        "node scripts/prepare-storage.mjs && node --import tsx scripts/migrate.ts && node --import tsx scripts/seed.ts",
       ]
     depends_on:
       db:
@@ -67,3 +80,6 @@ services:
 volumes:
   database:
   uploads:
+    name: ${OPERIX_UPLOAD_VOLUME:-operix_uploads}
+  security:
+  scanner:

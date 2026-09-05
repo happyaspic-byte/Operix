@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { getReport } from "@/lib/reports";
+import { securityLog } from "@/lib/security";
+import { AppError } from "@/lib/policy";
+import { DocumentDownload } from "@/components/document-download";
 import { formatDate } from "@/lib/dates";
 import { labels } from "@/lib/catalog";
 import { PrintButton } from "@/components/print-button";
@@ -10,11 +13,24 @@ export default async function Report({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireUser();
-  const [r] = await (
-    await getDb()
-  ).query("SELECT * FROM reports WHERE id=$1", [(await params).id]);
-  if (!r) notFound();
+  const u = await requireUser(),
+    id = (await params).id;
+  let r;
+  try {
+    r = await getReport(u, id);
+    await securityLog(u, { action: "read_report", kind: "reports", ids: [id] });
+  } catch (e) {
+    if (e instanceof AppError && [403, 404].includes(e.status)) {
+      await securityLog(u, {
+        action: "read_report",
+        kind: "reports",
+        ids: [id],
+        outcome: "denied",
+      });
+      notFound();
+    }
+    throw e;
+  }
   const s = r.snapshot,
     d = s.record;
   return (
@@ -38,7 +54,8 @@ export default async function Report({
           </p>
           <h1>{r.title}</h1>
           <small>
-            확정 버전 {r.revision} · {formatDate(r.created_at)}
+            {r.audience === "customer" ? "고객 제출용" : "내부 검토용"} · 확정
+            버전 {r.revision} · {formatDate(r.created_at)}
           </small>
         </div>
         <dl className="report-meta">
@@ -59,8 +76,8 @@ export default async function Report({
             <dd>{s.approved_name}</dd>
           </div>
           <div>
-            <dt>예정일</dt>
-            <dd>{formatDate(d.planned_date)}</dd>
+            <dt>{r.entity_kind === "tickets" ? "접수일" : "예정일"}</dt>
+            <dd>{formatDate(d.planned_date || d.created_at)}</dd>
           </div>
           <div>
             <dt>상태</dt>
@@ -126,16 +143,18 @@ export default async function Report({
             <h2>첨부 자료</h2>
             {s.documents.map((f: any) => (
               <p key={f.id}>
-                <a href={"/api/documents/" + f.id}>{f.name}</a>
+                <DocumentDownload doc={f} />
               </p>
             ))}
           </section>
         )}
         <footer>
+          발행 사유: {r.issue_reason || "이전 버전에서 생성"}
+          <br />
           본 문서는 확정 시점의 기록을 보존한 보고서입니다.
           <br />
           <span className="mono">
-            문서 ID {r.id} · v{r.revision}
+            {r.document_number || r.id} · v{r.revision}
           </span>
         </footer>
       </article>

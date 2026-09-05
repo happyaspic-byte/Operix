@@ -4,6 +4,8 @@ import { getDb } from "@/lib/db";
 import { AppError, requirePermission, roles } from "@/lib/policy";
 import { failure, readJson } from "@/lib/http";
 import { z } from "zod";
+import { healthStatus } from "@/lib/operations";
+import { lockBusiness } from "@/lib/transactions";
 export async function GET() {
   try {
     const u = await requireUser();
@@ -18,7 +20,12 @@ export async function GET() {
         "SELECT a.id,a.action,a.entity_kind,a.created_at,u.name user_name FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT 50",
       ),
     ]);
-    return NextResponse.json({ users, jobs, history });
+    return NextResponse.json({
+      users,
+      jobs,
+      history,
+      health: await healthStatus(),
+    });
   } catch (e) {
     return failure(e);
   }
@@ -58,11 +65,14 @@ export async function POST(request: Request) {
       db = await getDb();
     const id = d.id || crypto.randomUUID();
     await db.transaction(async (tx) => {
+      await lockBusiness(tx);
       if (d.id) {
         const [old] = await tx.query(
           "SELECT * FROM users WHERE id=$1 FOR UPDATE",
           [d.id],
         );
+        if (old?.privacy_erased_at)
+          throw new AppError(410, "파기된 계정은 복구할 수 없습니다.");
         if (!old) throw new AppError(404, "사용자를 찾을 수 없습니다.");
         if (old.version !== d.version)
           throw new AppError(
@@ -70,13 +80,13 @@ export async function POST(request: Request) {
             "사용자 정보가 변경되었습니다. 새로고침해 주세요.",
           );
         await tx.query(
-          "UPDATE users SET email=$2,name=$3,role=$4,active=$5,password_hash=coalesce($6,password_hash),version=version+1,updated_at=now() WHERE id=$1",
+          "UPDATE users SET email=$2,name=$3,role=$4,active=$5,password_hash=coalesce($6,password_hash),must_change_password=CASE WHEN $6::text IS NOT NULL THEN true ELSE must_change_password END,version=version+1,updated_at=now() WHERE id=$1",
           [id, d.email.toLowerCase(), d.name, d.role, d.active, hash],
         );
         await tx.query("DELETE FROM sessions WHERE user_id=$1", [id]);
       } else
         await tx.query(
-          "INSERT INTO users(id,email,name,role,active,password_hash) VALUES ($1,$2,$3,$4,$5,$6)",
+          "INSERT INTO users(id,email,name,role,active,password_hash,must_change_password) VALUES ($1,$2,$3,$4,$5,$6,true)",
           [id, d.email.toLowerCase(), d.name, d.role, d.active, hash],
         );
       await audit(tx, u.id, d.id ? "update_user" : "invite_user", "users", id, {

@@ -32,7 +32,12 @@ export function validateEntity(
           );
     else if (field.type === "number")
       schema = z.preprocess(
-        (v) => (v === "" || v === null || v === undefined ? null : Number(v)),
+        (v) =>
+          v === "" || v === null || v === undefined
+            ? null
+            : typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v)
+              ? Number(v)
+              : v,
         field.required
           ? z
               .number()
@@ -78,12 +83,13 @@ export function validateEntity(
   const data = parsed.data as Record<string, any>;
   if (kind === "assets") data.asset_tag = data.asset_tag || null;
   if (
-    kind === "customers" &&
+    ["customers", "customer_contacts"].includes(kind) &&
     data.email &&
     !z.email().safeParse(data.email).success
   )
     throw new AppError(400, "이메일 형식을 확인해 주세요.");
   if (kind === "contracts") {
+    data.notice_days ||= 90;
     if (data.term === "dated" && !data.end_date)
       throw new AppError(400, "기간 지정 계약은 종료일이 필요합니다.");
     if (data.term !== "dated") data.end_date = null;

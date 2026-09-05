@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { assertOrigin, requireUser } from "@/lib/auth";
 import { getRecord, saveRecord } from "@/lib/records";
+import { securityLog } from "@/lib/security";
 import { failure, readJson } from "@/lib/http";
 export async function GET(
   request: Request,
@@ -9,7 +10,13 @@ export async function GET(
   try {
     const user = await requireUser(),
       p = await params;
-    return NextResponse.json(await getRecord(p.kind, p.id, user));
+    const row = await getRecord(p.kind, p.id, user);
+    await securityLog(
+      user,
+      { action: "read", kind: p.kind, ids: [p.id] },
+      request,
+    );
+    return NextResponse.json(row);
   } catch (e) {
     return failure(e);
   }

@@ -1,0 +1,12 @@
+[Unit]
+Description=Operix encrypted offsite backup
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/operix
+EnvironmentFile=/etc/operix/backup.env
+ExecStart=/bin/bash /opt/operix/scripts/scheduled-backup.sh
+UMask=0077
+TimeoutStartSec=30min

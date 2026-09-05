@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireUser, audit } from "@/lib/auth";
 import { catalog } from "@/lib/catalog";
-import { selection } from "@/lib/records";
+import { listRecords } from "@/lib/records";
 import { getDb } from "@/lib/db";
-import { AppError, requirePermission, can, redact } from "@/lib/policy";
+import { AppError, requirePermission, can } from "@/lib/policy";
+import { securityLog } from "@/lib/security";
 import { failure } from "@/lib/http";
 import { safeCsv, workbookBytes } from "@/lib/sheets";
 export async function GET(
@@ -17,15 +18,27 @@ export async function GET(
       config = catalog[kind];
     if (!config) throw new AppError(404, "자료 유형을 찾을 수 없습니다.");
     const db = await getDb();
-    const [count] = await db.query(`SELECT count(*)::int total FROM ${kind}`);
-    if (count.total > 10000)
-      throw new AppError(
-        400,
-        "한 번에 10,000건까지 내보낼 수 있습니다. 대용량 내보내기는 관리자에게 요청해 주세요.",
-      );
-    const rows = (
-      await db.query(selection(kind) + " ORDER BY e.created_at LIMIT 10000")
-    ).map((r) => redact(r, u.role));
+    const query = new URL(request.url).searchParams;
+    const rows = await db.transaction(async (tx) => {
+      await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+      const output: Record<string, any>[] = [];
+      const params = new URLSearchParams(query);
+      params.set("limit", "100");
+      params.set("page", "1");
+      let result = await listRecords(kind, u, params, tx);
+      if (result.total > 10000)
+        throw new AppError(
+          400,
+          "검색 조건으로 10,000건 이하로 줄인 뒤 내보내 주세요.",
+        );
+      output.push(...result.rows);
+      for (let page = 2; output.length < result.total; page++) {
+        params.set("page", String(page));
+        result = await listRecords(kind, u, params, tx);
+        output.push(...result.rows);
+      }
+      return output;
+    });
     const columns: [string, string][] = [
       ["id", "내부 ID"],
       ...config.fields
@@ -48,7 +61,18 @@ export async function GET(
             ].join("\r\n"),
         )
       : await workbookBytes(rows, columns);
-    await audit(db, u.id, "export", kind, "all", { count: rows.length });
+    await audit(db, u.id, "export", kind, "filtered", { count: rows.length });
+    for (let n = 0; n < Math.max(rows.length, 1); n += 100)
+      await securityLog(
+        u,
+        {
+          action: "export",
+          kind,
+          ids: rows.slice(n, n + 100).map((r) => r.id),
+          reason: "사용자가 선택한 목록 조건 내보내기",
+        },
+        request,
+      );
     return new NextResponse(bytes, {
       headers: {
         "Content-Type": csv

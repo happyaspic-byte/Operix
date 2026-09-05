@@ -284,6 +284,7 @@ test("customer → site → asset → contract → inspection → immutable repo
     .click();
   await expect(page).toHaveURL(/\/inspections\/[^/]+$/);
   const inspectionId = new URL(page.url()).pathname.split("/").pop()!;
+  page.once("dialog", (dialog) => dialog.accept("회귀 검증 작업 보고서 확정"));
   await page.getByRole("button", { name: "보고서 확정", exact: true }).click();
   await page
     .getByRole("button", { name: /문서·보고서/ })
@@ -442,7 +443,13 @@ test("uploads validate bytes, require authentication and preserve contents", asy
   });
   expect(file.status()).toBe(201);
   const doc = await file.json();
-  const downloaded = await request.get("/api/documents/" + doc.id);
+  expect(doc.scan_status).toBe("clean");
+  const grant = await request.post("/api/documents/" + doc.id, {
+    headers: origin,
+    data: { reason: "회귀 테스트 자료 검증" },
+  });
+  expect(grant.status()).toBe(200);
+  const downloaded = await request.get((await grant.json()).url);
   expect(await downloaded.body()).toEqual(payload);
   const guest = await playwright.request.newContext({ baseURL: base });
   expect((await guest.get("/api/documents/" + doc.id)).status()).toBe(401);
@@ -554,4 +561,154 @@ test("accessibility: no serious or critical automated findings on key pages", as
     JSON.stringify(findings, null, 2),
   );
   expect(findings).toEqual([]);
+});
+
+test("A05/A06: malformed API roots and pagination return 400", async ({
+  request,
+}) => {
+  await apiLogin(request);
+  for (const path of ["/api/entries", "/api/reports", "/api/settings"])
+    for (const body of ["null", "[]", "5", "{}"]) {
+      const r = await request.post(path, {
+        headers: { ...origin, "Content-Type": "application/json" },
+        data: body,
+      });
+      expect(r.status(), path + " " + body).toBe(400);
+    }
+  for (const path of ["/api/data/assets", "/api/documents", "/api/reports"])
+    for (const value of ["abc", "0", "1.5", "Infinity"])
+      expect((await request.get(path + "?page=" + value)).status(), path).toBe(
+        400,
+      );
+});
+test("A07: Escape preserves dirty fields unless discard is confirmed", async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto("/customers");
+  await page.getByRole("button", { name: "고객사 등록", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("고객사명", { exact: false })
+    .fill("저장 전 입력 검증");
+  page.once("dialog", (d) => d.dismiss());
+  await page.getByRole("dialog").press("Escape");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByLabel("고객사명", { exact: false }),
+  ).toHaveValue("저장 전 입력 검증");
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("dialog").press("Escape");
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+});
+test("A01/A08: viewer cannot list or download financial attachments and sees no audit metadata", async ({
+  request,
+  playwright,
+}) => {
+  await apiLogin(request);
+  const contracts = await (await request.get("/api/data/contracts")).json(),
+    id = contracts.rows[0].id;
+  const file = await request.post("/api/documents", {
+    headers: origin,
+    multipart: {
+      entity_kind: "contracts",
+      entity_id: id,
+      classification: "financial",
+      file: {
+        name: "finance-verification.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("Synthetic financial information"),
+      },
+    },
+  });
+  expect(file.status()).toBe(201);
+  const doc = await file.json(),
+    viewer = await playwright.request.newContext({ baseURL: base });
+  await apiLogin(viewer, "viewer@operix.test", process.env.DEMO_PASSWORD);
+  expect((await viewer.get("/api/documents/" + doc.id)).status()).toBe(403);
+  const list = await (
+    await viewer.get("/api/documents?entity_id=" + id)
+  ).json();
+  expect(list.rows.some((d: any) => d.id === doc.id)).toBe(false);
+  expect((await (await viewer.get("/api/dashboard")).json()).activity).toEqual(
+    [],
+  );
+  await viewer.dispose();
+});
+test("B03: initial password gate, self change and other-session revocation", async ({
+  request,
+  playwright,
+}) => {
+  await apiLogin(request);
+  const email = "new-" + Date.now() + "@example.test",
+    old = "Synthetic-initial-password-123!",
+    next = "Synthetic-changed-password-456!";
+  expect(
+    (
+      await request.post("/api/settings", {
+        headers: origin,
+        data: {
+          email,
+          name: "Initial password fixture",
+          role: "engineer",
+          active: true,
+          password: old,
+        },
+      })
+    ).status(),
+  ).toBe(200);
+  const a = await playwright.request.newContext({ baseURL: base }),
+    b = await playwright.request.newContext({ baseURL: base });
+  await apiLogin(a, email, old);
+  await apiLogin(b, email, old);
+  expect((await a.get("/api/data/assets")).status()).toBe(403);
+  expect(
+    (
+      await a.post("/api/account", {
+        headers: origin,
+        data: { action: "password", current_password: old, password: next },
+      })
+    ).status(),
+  ).toBe(200);
+  expect((await a.get("/api/data/assets")).status()).toBe(200);
+  expect((await b.get("/api/data/assets")).status()).toBe(401);
+  await a.dispose();
+  await b.dispose();
+});
+test("new administration and calendar pages render with CSP and screenshots", async ({
+  page,
+}) => {
+  await login(page);
+  for (const path of [
+    "/documents",
+    "/calendar",
+    "/account",
+    "/settings",
+    "/security",
+  ]) {
+    const response = await page.goto(path);
+    expect(response?.headers()["content-security-policy"]).toContain(
+      "object-src 'none'",
+    );
+    expect(response?.headers()["content-security-policy"]).not.toContain(
+      "'unsafe-eval'",
+    );
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await page.waitForTimeout(300);
+    await page.screenshot({
+      path: shotDir + "/hardening-" + path.slice(1) + ".jpg",
+      type: "jpeg",
+      quality: 80,
+      fullPage: true,
+    });
+    const findings = (
+      await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze()
+    ).violations.filter((v) =>
+      ["serious", "critical"].includes(v.impact || ""),
+    );
+    expect(
+      findings.map((v) => v.id),
+      path,
+    ).toEqual([]);
+  }
 });

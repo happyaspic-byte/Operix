@@ -10,15 +10,22 @@ import {
   CheckCircle2,
   Clock3,
   Send,
-  Download,
   History,
   ExternalLink,
 } from "lucide-react";
-import { catalog, labels } from "@/lib/catalog";
+import { catalog } from "@/lib/catalog";
 import { can } from "@/lib/policy";
 import { formatDate } from "@/lib/dates";
 import { api, useUser, Badge, ErrorNotice, Loading, Empty, Expiry } from "./ui";
 import { RecordEditor } from "./record-editor";
+import { WorkStatus } from "./work-status";
+import { DocumentDownload } from "./document-download";
+import { Pager } from "./documents";
+import {
+  classificationNames,
+  readableClasses,
+  defaultClassification,
+} from "@/lib/document-policy";
 import { RecordTable } from "./record-table";
 export function EntityDetail({ kind, id }: { kind: string; id: string }) {
   const user = useUser(),
@@ -26,6 +33,12 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
     [data, setData] = useState<any>(null),
     [error, setError] = useState(""),
     [tab, setTab] = useState("overview"),
+    [page, setPage] = useState(1),
+    [search, setSearch] = useState(""),
+    [audience, setAudience] = useState("internal"),
+    [classification, setClassification] = useState(defaultClassification(kind)),
+    [customerVisible, setCustomerVisible] = useState(false),
+    [message, setMessage] = useState(""),
     [editor, setEditor] = useState<{ kind: string; initial?: any } | null>(
       null,
     ),
@@ -34,19 +47,27 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
     [evidence, setEvidence] = useState("observed"),
     [busy, setBusy] = useState(false);
   useEffect(() => {
-    api(`/api/details/${kind}/${id}`)
+    api(
+      `/api/details/${kind}/${id}?` +
+        new URLSearchParams({ section: tab, page: String(page), q: search }),
+    )
       .then((d) => {
         setData(d);
         setError("");
       })
       .catch((e) => setError(e.message));
-  }, [kind, id, revision]);
+  }, [kind, id, revision, tab, page, search]);
+  useEffect(() => {
+    setPage(1);
+    setSearch("");
+  }, [tab]);
   async function run(task: () => Promise<any>) {
     setError("");
     setBusy(true);
     try {
       await task();
       setRevision((n) => n + 1);
+      setMessage("저장했습니다.");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -156,26 +177,70 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
               수정
             </button>
           )}
+          {kind === "inspections" &&
+            writable &&
+            record.status === "completed" &&
+            record.follow_up && (
+              <button
+                className="button"
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    const r = await api("/api/workflow", {
+                      method: "POST",
+                      body: JSON.stringify({
+                        action: "follow_up",
+                        inspection_id: id,
+                        title: record.name + " · 후속 작업",
+                      }),
+                    });
+                    location.assign("/tickets/" + r.id);
+                  })
+                }
+              >
+                후속 작업 열기
+              </button>
+            )}
           {work && can(user.role, "reports:approve") && (
-            <button
-              className="button primary"
-              disabled={busy}
-              onClick={() =>
-                run(() =>
-                  api("/api/reports", {
-                    method: "POST",
-                    body: JSON.stringify({ entity_kind: kind, entity_id: id }),
-                  }),
-                )
-              }
-            >
-              <FileText size={16} />
-              보고서 확정
-            </button>
+            <>
+              <select
+                aria-label="보고서 용도"
+                value={audience}
+                onChange={(e) => setAudience(e.target.value)}
+              >
+                <option value="internal">내부 검토용</option>
+                <option value="customer">고객 제출용</option>
+              </select>
+              <button
+                className="button primary"
+                disabled={busy}
+                onClick={() => {
+                  const reason = window.prompt(
+                    "보고서 발행·개정 사유를 입력해 주세요. (5자 이상)",
+                  );
+                  if (reason)
+                    run(() =>
+                      api("/api/reports", {
+                        method: "POST",
+                        body: JSON.stringify({
+                          entity_kind: kind,
+                          entity_id: id,
+                          audience,
+                          issue_reason: reason,
+                        }),
+                      }),
+                    );
+                }}
+              >
+                <FileText size={16} />
+                보고서 확정
+              </button>
+            </>
           )}
         </div>
       </div>
       <ErrorNotice message={error} />
+      {message && <p role="status">{message}</p>}
       <div className="tabs">
         <button
           className={tab === "overview" ? "active" : ""}
@@ -190,7 +255,7 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
             onClick={() => setTab(k)}
           >
             {catalog[k].title}
-            <span>{data.related[k].length}</span>
+            <span>{data.totals[k]}</span>
           </button>
         ))}
         {work && (
@@ -198,14 +263,14 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
             className={tab === "timeline" ? "active" : ""}
             onClick={() => setTab("timeline")}
           >
-            작업 기록<span>{data.entries.length}</span>
+            작업 기록<span>{data.totals.timeline}</span>
           </button>
         )}
         <button
           className={tab === "documents" ? "active" : ""}
           onClick={() => setTab("documents")}
         >
-          문서·보고서<span>{data.documents.length + data.reports.length}</span>
+          문서·보고서<span>{data.totals.documents + data.totals.reports}</span>
         </button>
         {can(user.role, "audit") && (
           <button
@@ -251,7 +316,7 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
                   key={k}
                 >
                   <span>{catalog[k].title}</span>
-                  <strong>{data.related[k].length}</strong>
+                  <strong>{data.totals[k]}</strong>
                 </button>
               ))}
               <div className="record-time">
@@ -271,6 +336,19 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
           </aside>
         </div>
       )}
+      {tab !== "overview" && (
+        <div className="list-toolbar">
+          <input
+            aria-label="상세 목록 검색"
+            placeholder="이 목록에서 검색"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+      )}
       {relationshipTabs.includes(tab) && (
         <section className="panel">
           <div className="panel-heading">
@@ -284,7 +362,9 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
                     initial: {
                       ...(kind === "assets" ? { asset_id: id } : {}),
                       ...(kind === "customers" ? { customer_id: id } : {}),
-                      ...(kind === "sites" ? { site_id: id } : {}),
+                      ...(kind === "sites"
+                        ? { site_id: id, customer_id: record.customer_id }
+                        : {}),
                       ...(tab === "contracts" && kind === "assets"
                         ? { customer_id: record.customer_id, asset_ids: [id] }
                         : {}),
@@ -322,6 +402,7 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
                       entity_id: id,
                       body,
                       evidence_level: evidence,
+                      customer_visible: customerVisible,
                     }),
                   });
                   setBody("");
@@ -348,6 +429,15 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
                   <option value="internal">내부 추정</option>
                   <option value="vendor">제조사 확인</option>
                 </select>
+                <label className="inline-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={customerVisible}
+                    disabled={evidence === "internal"}
+                    onChange={(e) => setCustomerVisible(e.target.checked)}
+                  />
+                  고객 제출 보고서에 포함
+                </label>
                 <button className="button primary" disabled={busy}>
                   <Send size={15} />
                   기록 추가
@@ -382,31 +472,48 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
           <div className="panel-heading">
             <h2>첨부 자료와 확정 보고서</h2>
             {writable && (
-              <label className="button small upload-button">
-                <Paperclip size={15} />
-                자료 첨부
-                <input
-                  className="sr-only"
-                  aria-label="첨부 파일"
-                  type="file"
-                  accept=".png,.jpg,.jpeg,.pdf,.txt,.csv,.log,.zip,.docx,.xlsx"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file)
-                      run(async () => {
-                        const f = new FormData();
-                        f.set("file", file);
-                        f.set("entity_kind", kind);
-                        f.set("entity_id", id);
-                        await api("/api/documents", {
-                          method: "POST",
-                          body: f,
+              <>
+                <select
+                  aria-label="첨부 기밀등급"
+                  value={classification}
+                  onChange={(e) =>
+                    setClassification(e.target.value as typeof classification)
+                  }
+                >
+                  {readableClasses(user.role).map((c) => (
+                    <option value={c} key={c}>
+                      {classificationNames[c]}
+                    </option>
+                  ))}
+                </select>
+                <label className="button small upload-button">
+                  <Paperclip size={15} />
+                  자료 첨부
+                  <input
+                    className="sr-only"
+                    aria-label="첨부 파일"
+                    type="file"
+                    disabled={busy}
+                    accept=".png,.jpg,.jpeg,.pdf,.txt,.csv,.log,.zip,.docx,.xlsx"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file)
+                        run(async () => {
+                          const f = new FormData();
+                          f.set("file", file);
+                          f.set("entity_kind", kind);
+                          f.set("entity_id", id);
+                          f.set("classification", classification);
+                          await api("/api/documents", {
+                            method: "POST",
+                            body: f,
+                          });
                         });
-                      });
-                    e.target.value = "";
-                  }}
-                />
-              </label>
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </>
             )}
           </div>
           <div className="document-list">
@@ -430,23 +537,9 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
               </Link>
             ))}
             {data.documents.map((doc: any) => (
-              <a
-                className="document-row"
-                href={"/api/documents/" + doc.id}
-                key={doc.id}
-              >
-                <span className="document-icon">
-                  <Paperclip size={21} />
-                </span>
-                <div>
-                  <strong>{doc.name}</strong>
-                  <small>
-                    {Math.max(1, Math.round(Number(doc.size_bytes) / 1024))} KB
-                    · {formatDate(doc.created_at)}
-                  </small>
-                </div>
-                <Download size={17} />
-              </a>
+              <div className="document-row" key={doc.id}>
+                <DocumentDownload doc={doc} />
+              </div>
             ))}
           </div>
           {!data.reports.length && !data.documents.length && (
@@ -479,6 +572,18 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
             ))}
           </div>
         </section>
+      )}
+      {tab === "timeline" && <WorkStatus record={record} />}
+      {tab !== "overview" && (
+        <Pager
+          page={page}
+          total={
+            tab === "documents"
+              ? Math.max(data.totals.documents, data.totals.reports)
+              : data.totals[tab] || 0
+          }
+          onPage={setPage}
+        />
       )}
       {editor && (
         <RecordEditor

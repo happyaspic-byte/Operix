@@ -19,9 +19,14 @@ export async function api(url: string, options?: RequestInit) {
   });
   const data = await response.json();
   if (!response.ok) {
-    if (response.status === 401 && !location.pathname.startsWith("/login"))
-      location.assign("/login");
-    throw new Error(data.error || "요청을 처리하지 못했습니다.");
+    if (response.status === 401 && !url.startsWith("/api/auth/login"))
+      throw new Error(
+        "로그인이 만료되었습니다. 입력 내용은 이 화면에 유지됩니다. 다른 탭에서 다시 로그인한 후 저장해 주세요.",
+      );
+    throw Object.assign(
+      new Error(data.error || "요청을 처리하지 못했습니다."),
+      { status: response.status },
+    );
   }
   return data;
 }

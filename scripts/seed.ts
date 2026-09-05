@@ -19,8 +19,17 @@ if (!email || !password || password.length < 12)
 const hash = await hashPassword(password),
   adminId = id("admin");
 await db.query(
-  "INSERT INTO users(id,email,name,role,password_hash) VALUES ($1,$2,'관리자','admin',$3) ON CONFLICT(email) DO NOTHING",
-  [adminId, email, hash],
+  "INSERT INTO users(id,email,name,role,password_hash,must_change_password) VALUES ($1,$2,'관리자','admin',$3,$4) ON CONFLICT(email) DO NOTHING",
+  [
+    adminId,
+    email,
+    hash,
+    ![
+      process.env.CI === "true",
+      process.env.OPERIX_EMBEDDED === "1",
+      process.env.OPERIX_CONTAINER_TEST === "1",
+    ].some(Boolean),
+  ],
 );
 const [admin] = await db.query("SELECT * FROM users WHERE email=$1", [email]);
 if (process.env.SEED_DEMO === "1") {

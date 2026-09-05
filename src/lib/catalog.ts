@@ -489,3 +489,83 @@ export const labels: Record<string, string> = {
   dated: "기간 지정",
   none: "해당 없음",
 };
+
+catalog.customer_contacts = {
+  title: "고객 연락처",
+  singular: "고객 담당자",
+  description: "고객사와 사업장의 기술·계약·청구 담당자를 관리합니다.",
+  permission: "customers:write",
+  columns: [
+    ["name", "이름"],
+    ["customer_name", "고객사"],
+    ["contact_role", "역할"],
+    ["email", "이메일"],
+    ["phone", "연락처"],
+    ["status", "상태"],
+  ],
+  fields: [
+    {
+      key: "customer_id",
+      label: "고객사",
+      type: "relation",
+      entity: "customers",
+      required: true,
+    },
+    { key: "site_id", label: "사업장", type: "relation", entity: "sites" },
+    { key: "name", label: "이름", required: true },
+    { key: "department", label: "부서" },
+    {
+      key: "contact_role",
+      label: "연락 역할",
+      type: "select",
+      options: [
+        ["technical", "기술 담당"],
+        ["contract", "계약 담당"],
+        ["billing", "청구 담당"],
+        ["other", "기타"],
+      ],
+    },
+    { key: "email", label: "이메일" },
+    { key: "phone", label: "연락처" },
+    active,
+    notes,
+  ],
+};
+catalog.contracts.fields.push(
+  {
+    key: "predecessor_id",
+    label: "이전 계약",
+    type: "relation",
+    entity: "contracts",
+  },
+  {
+    key: "notice_days",
+    label: "사전 알림 시작 (일)",
+    type: "number",
+    min: 1,
+    max: 365,
+  },
+);
+catalog.assets.fields.push(
+  { key: "eol_date", label: "EOL (판매 종료일)", type: "date" },
+  { key: "eos_date", label: "EOS (지원 종료일)", type: "date" },
+  {
+    key: "lifecycle_status",
+    label: "자산 생애주기",
+    type: "select",
+    options: [
+      ["operating", "운영 중"],
+      ["replacement_planned", "교체 계획"],
+      ["retired", "철수"],
+    ],
+  },
+);
+Object.assign(labels, {
+  technical: "기술 담당",
+  contract: "계약 담당",
+  billing: "청구 담당",
+  other: "기타",
+  operating: "운영 중",
+  replacement_planned: "교체 계획",
+  retired: "철수",
+});

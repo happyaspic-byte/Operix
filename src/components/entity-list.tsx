@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   Search,
@@ -18,6 +19,11 @@ import { ImportDialog } from "./import-dialog";
 export function EntityList({ entity }: { entity: string }) {
   const user = useUser(),
     [kind, setKind] = useState(entity),
+    [ready, setReady] = useState(false),
+    [mine, setMine] = useState(false),
+    [from, setFrom] = useState(""),
+    [to, setTo] = useState(""),
+    [expiry, setExpiry] = useState(""),
     [query, setQuery] = useState(""),
     [status, setStatus] = useState(""),
     [sort, setSort] = useState("created_at"),
@@ -31,20 +37,59 @@ export function EntityList({ entity }: { entity: string }) {
     [presets, setPresets] = useState<any[]>([]);
   const config = catalog[kind];
   useEffect(() => {
-    setKind(entity);
-    setPage(1);
-    setStatus("");
-    if (new URLSearchParams(window.location.search).get("new") === "1")
-      setEditor(true);
+    function restore() {
+      const p = new URLSearchParams(location.search);
+      const requested = p.get("view");
+      setKind(
+        requested && Object.hasOwn(catalog, requested) ? requested : entity,
+      );
+      setQuery(p.get("q") || "");
+      setStatus(p.get("status") || "");
+      setSort(p.get("sort") || "created_at");
+      setPage(Math.max(1, Number(p.get("page")) || 1));
+      setMine(p.get("mine") === "1");
+      setFrom(p.get("from") || "");
+      setTo(p.get("to") || "");
+      setExpiry(p.get("expiry") || "");
+      if (p.get("new") === "1") setEditor(true);
+      setReady(true);
+    }
+    restore();
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
   }, [entity]);
+  const filters = new URLSearchParams({
+    view: kind,
+    q: query,
+    page: String(page),
+    status,
+    sort,
+    direction: sort === "name" ? "asc" : "desc",
+    mine: mine ? "1" : "",
+    from,
+    to,
+    expiry,
+    date_field:
+      kind === "inspections"
+        ? "planned_date"
+        : kind === "contracts"
+          ? "end_date"
+          : "created_at",
+  });
   useEffect(() => {
+    if (ready)
+      window.history.replaceState(
+        null,
+        "",
+        "/" + entity + "?" + filters.toString(),
+      );
+  }, [ready, entity, kind, query, page, status, sort, mine, from, to, expiry]);
+  useEffect(() => {
+    if (!ready) return;
     const c = new AbortController();
     const timer = setTimeout(
       () => {
-        api(
-          `/api/data/${kind}?q=${encodeURIComponent(query)}&page=${page}&status=${status}&sort=${sort}&direction=${sort === "name" ? "asc" : "desc"}`,
-          { signal: c.signal },
-        )
+        api(`/api/data/${kind}?` + filters.toString(), { signal: c.signal })
           .then((d) => {
             setData(d);
             setError("");
@@ -59,7 +104,19 @@ export function EntityList({ entity }: { entity: string }) {
       clearTimeout(timer);
       c.abort();
     };
-  }, [kind, query, status, page, sort, revision]);
+  }, [
+    ready,
+    kind,
+    query,
+    status,
+    page,
+    sort,
+    revision,
+    mine,
+    from,
+    to,
+    expiry,
+  ]);
   useEffect(() => {
     try {
       const preferences = JSON.parse(
@@ -87,7 +144,7 @@ export function EntityList({ entity }: { entity: string }) {
   const statusField = config.fields.find((f) => f.key === "status");
   const tabs =
     entity === "customers"
-      ? ["customers", "sites"]
+      ? ["customers", "sites", "customer_contacts"]
       : entity === "inspections"
         ? ["inspections", "maintenance_plans"]
         : [];
@@ -108,12 +165,18 @@ export function EntityList({ entity }: { entity: string }) {
           <p>{catalog[entity].description}</p>
         </div>
         <div className="heading-actions">
-          {kind === "assets" && can(user.role, "assets:write") && (
-            <button className="button" onClick={() => setImporter(true)}>
-              <Upload size={16} />
-              가져오기
-            </button>
+          {entity === "inspections" && (
+            <Link className="button" href="/calendar">
+              주·월간 일정
+            </Link>
           )}
+          {["customers", "sites", "assets", "contracts"].includes(kind) &&
+            can(user.role, config.permission) && (
+              <button className="button" onClick={() => setImporter(true)}>
+                <Upload size={16} />
+                가져오기
+              </button>
+            )}
           {can(user.role, config.permission) && (
             <button className="button primary" onClick={() => setEditor(true)}>
               <Plus size={17} />
@@ -221,14 +284,76 @@ export function EntityList({ entity }: { entity: string }) {
                   <span>내보내기</span>
                 </summary>
                 <div>
-                  <a href={`/api/export/${kind}`}>전체 XLSX</a>
-                  <a href={`/api/export/${kind}?format=csv`}>전체 CSV</a>
+                  <a href={`/api/export/${kind}?${filters.toString()}`}>
+                    현재 조건 XLSX
+                  </a>
+                  <a
+                    href={`/api/export/${kind}?${filters.toString()}&format=csv`}
+                  >
+                    현재 조건 CSV
+                  </a>
                 </div>
               </details>
             )}
           </div>
         </div>
         <div className="view-preferences">
+          {config.fields.some((f) =>
+            ["assignee_id", "owner_id"].includes(f.key),
+          ) && (
+            <label className="inline-checkbox">
+              <input
+                type="checkbox"
+                checked={mine}
+                onChange={(e) => {
+                  setMine(e.target.checked);
+                  setPage(1);
+                }}
+              />
+              내 담당 업무
+            </label>
+          )}
+          <label>
+            기간 시작
+            <input
+              aria-label="기간 시작"
+              type="date"
+              value={from}
+              onChange={(e) => {
+                setFrom(e.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+          <label>
+            기간 종료
+            <input
+              aria-label="기간 종료"
+              type="date"
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+          {kind === "contracts" && (
+            <select
+              aria-label="계약 만료 필터"
+              value={expiry}
+              onChange={(e) => {
+                setExpiry(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">모든 만료 상태</option>
+              <option value="30">30일 이내 만료</option>
+              <option value="overdue">이미 만료</option>
+              <option value="unknown">기간 미확인</option>
+              <option value="perpetual">무기한</option>
+            </select>
+          )}
+
           <select
             aria-label="저장한 필터"
             value=""
@@ -323,6 +448,7 @@ export function EntityList({ entity }: { entity: string }) {
       )}
       {importer && (
         <ImportDialog
+          kind={kind}
           onClose={() => setImporter(false)}
           onDone={() => {
             setImporter(false);

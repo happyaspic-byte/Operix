@@ -43,6 +43,7 @@ export function Shell({
     [q, setQ] = useState(""),
     [results, setResults] = useState<any[]>([]),
     [notifications, setNotifications] = useState<any[]>([]),
+    [unreadTotal, setUnreadTotal] = useState(0),
     [panel, setPanel] = useState(false),
     [searchError, setSearchError] = useState("");
   const current =
@@ -58,10 +59,30 @@ export function Shell({
     setPanel(false);
   }, [pathname]);
   useEffect(() => {
-    api("/api/notifications")
-      .then(setNotifications)
-      .catch(() => {});
-  }, [pathname]);
+    if (user.must_change_password) return;
+    let live = true;
+    const refresh = () => {
+      if (document.visibilityState === "visible")
+        api("/api/notifications", { headers: { "X-Operix-Background": "1" } })
+          .then((d) => {
+            if (live) {
+              setNotifications(d.rows);
+              setUnreadTotal(d.unread_total);
+            }
+          })
+          .catch(() => {});
+    };
+    refresh();
+    const timer = setInterval(refresh, 60000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [pathname, user.must_change_password]);
+  useEffect(() => {
+    if (user.must_change_password && pathname !== "/account")
+      router.replace("/account");
+  }, [pathname, user.must_change_password, router]);
   useEffect(() => {
     if (!q.trim()) {
       setResults([]);
@@ -141,6 +162,20 @@ export function Shell({
             ))}
           </nav>
           <div className="sidebar-footer">
+            <Link className="nav-item" href="/notifications">
+              <Bell size={19} />
+              <span>알림 전체 보기</span>
+            </Link>
+            {["admin", "manager"].includes(user.role) && (
+              <Link className="nav-item" href="/security">
+                <Files size={19} />
+                <span>접속기록 점검</span>
+              </Link>
+            )}
+            <Link className="nav-item" href="/account">
+              <Settings2 size={19} />
+              <span>내 계정</span>
+            </Link>
             <div className="workspace-health">
               <span className="status-dot" />
               <span>고객과 업무를 연결하는 공간</span>
@@ -228,7 +263,7 @@ export function Shell({
               <span className="topbar-divider" />
               <div className="notification-wrap">
                 <button
-                  className={`icon-button ${notifications.some((n) => !n.read_at) ? "has-unread" : ""}`}
+                  className={`icon-button ${unreadTotal > 0 ? "has-unread" : ""}`}
                   aria-label="알림"
                   aria-expanded={panel}
                   onClick={() => setPanel(!panel)}
@@ -242,6 +277,7 @@ export function Shell({
                       <button
                         onClick={async () => {
                           await api("/api/notifications", { method: "PATCH" });
+                          setUnreadTotal(0);
                           setNotifications(
                             notifications.map((n) => ({
                               ...n,

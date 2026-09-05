@@ -1,7 +1,7 @@
 import { getDb } from "./db";
 import type { User } from "./auth";
 import { todayKST, addDays } from "./dates";
-import { redact } from "./policy";
+import { can, redact } from "./policy";
 export async function overview(user: User) {
   const db = await getDb(),
     today = todayKST();
@@ -24,9 +24,11 @@ export async function overview(user: User) {
       db.query(
         "SELECT t.*,c.name customer_name,u.name assignee_name FROM tickets t JOIN customers c ON c.id=t.customer_id LEFT JOIN users u ON u.id=t.assignee_id WHERE t.status NOT IN ('resolved','closed') ORDER BY CASE t.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END,t.updated_at DESC LIMIT 4",
       ),
-      db.query(
-        "SELECT a.id,a.action,a.entity_kind,a.entity_id,a.created_at,u.name user_name FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT 5",
-      ),
+      can(user.role, "audit")
+        ? db.query(
+            "SELECT a.id,a.action,a.entity_kind,a.entity_id,a.created_at,u.name user_name FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT 5",
+          )
+        : Promise.resolve([]),
     ]);
   return {
     today,

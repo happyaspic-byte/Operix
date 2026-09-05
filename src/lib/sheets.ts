@@ -22,6 +22,8 @@ export function guardSpreadsheetArchive(bytes: Buffer) {
   for (let n = 0; n < count; n++) {
     if (offset + 46 > bytes.length || bytes.readUInt32LE(offset) !== 0x02014b50)
       throw new AppError(400, "손상된 XLSX 파일입니다.");
+    if (bytes.readUInt16LE(offset + 8) & 1)
+      throw new AppError(400, "암호화된 압축 파일은 검사할 수 없습니다.");
     const size = bytes.readUInt32LE(offset + 24);
     expanded += size;
     if (size === 0xffffffff || expanded > 32 * 1024 * 1024)

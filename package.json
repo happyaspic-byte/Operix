@@ -1,23 +1,25 @@
 {
   "name": "operix",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=24.0.0 <25"
   },
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build --webpack",
     "start": "node --env-file-if-exists=.env scripts/start.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "node --env-file-if-exists=.env --import tsx --test --test-concurrency=1 tests/*.test.ts",
     "test:e2e": "playwright test",
     "db:migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
     "db:seed": "node --env-file-if-exists=.env --import tsx scripts/seed.ts",
     "setup:local": "node scripts/setup-local.mjs",
     "worker": "node --env-file-if-exists=.env --import tsx scripts/worker.ts",
-    "jobs:run": "node --env-file-if-exists=.env --import tsx scripts/worker.ts --once"
+    "jobs:run": "node --env-file-if-exists=.env --import tsx scripts/worker.ts --once",
+    "lint": "oxlint src scripts tests e2e --deny correctness --max-warnings 0",
+    "format:check": "prettier --check src scripts tests e2e .github *.ts *.json *.yaml"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",
@@ -41,6 +43,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
     "agent-browser": "0.36.0",
+    "oxlint": "1.81.0",
     "prettier": "3.9.6",
     "typescript": "7.0.2"
   },

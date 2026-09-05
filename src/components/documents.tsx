@@ -1,112 +1,229 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { FileText, Paperclip, ArrowUpRight, Download } from "lucide-react";
-import { api, Loading, ErrorNotice, Empty } from "./ui";
+import { api, ErrorNotice, Loading, Empty, useUser } from "./ui";
+import { DocumentDownload, type DocumentView } from "./document-download";
+import { classificationNames } from "@/lib/document-policy";
 import { formatDate } from "@/lib/dates";
-import { catalog } from "@/lib/catalog";
+import { can } from "@/lib/policy";
 export function Documents() {
-  const [docs, setDocs] = useState<any[] | null>(null),
-    [reports, setReports] = useState<any[]>([]),
+  const user = useUser(),
     [tab, setTab] = useState("reports"),
-    [error, setError] = useState("");
+    [page, setPage] = useState(1),
+    [q, setQ] = useState(""),
+    [from, setFrom] = useState(""),
+    [to, setTo] = useState(""),
+    [classification, setClassification] = useState(""),
+    [data, setData] = useState<{ rows: any[]; total: number } | null>(null),
+    [error, setError] = useState(""),
+    [revision, refresh] = useState(0);
   useEffect(() => {
-    Promise.all([api("/api/documents"), api("/api/reports")])
-      .then(([d, r]) => {
-        setDocs(d);
-        setReports(r);
-      })
-      .catch((e) => setError(e.message));
-  }, []);
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      api(
+        "/api/" +
+          tab +
+          "?" +
+          new URLSearchParams({
+            page: String(page),
+            q,
+            from,
+            to,
+            classification,
+          }),
+        { signal: abort.signal },
+      )
+        .then(setData)
+        .catch((e) => {
+          if (e.name !== "AbortError") setError(e.message);
+        });
+    }, 150);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [tab, page, q, from, to, classification, revision]);
   return (
     <>
       <div className="page-heading">
         <div>
           <div className="eyebrow">TEAM KNOWLEDGE</div>
           <h1>문서·보고서</h1>
-          <p>현장의 자료와 확정된 작업 보고서를 찾아보세요.</p>
+          <p>열람 권한이 있는 자료를 검색하고 확인합니다.</p>
         </div>
       </div>
       <div className="tabs">
-        <button
-          className={tab === "reports" ? "active" : ""}
-          onClick={() => setTab("reports")}
-        >
-          확정 보고서<span>{reports.length}</span>
-        </button>
-        <button
-          className={tab === "docs" ? "active" : ""}
-          onClick={() => setTab("docs")}
-        >
-          첨부 자료<span>{docs?.length || 0}</span>
-        </button>
+        {[
+          ["reports", "확정 보고서"],
+          ["documents", "첨부 자료"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            className={tab === key ? "active" : ""}
+            onClick={() => {
+              setTab(key);
+              setPage(1);
+              setData(null);
+            }}
+          >
+            {label}
+          </button>
+        ))}
       </div>
       <ErrorNotice message={error} />
       <section className="panel">
-        {docs === null ? (
-          <Loading />
-        ) : tab === "reports" ? (
-          reports.length ? (
-            <div className="document-list">
-              {reports.map((r) => (
-                <Link
-                  className="document-row"
-                  href={"/reports/" + r.id}
-                  key={r.id}
-                >
-                  <span className="document-icon">
-                    <FileText />
-                  </span>
-                  <div>
-                    <strong>{r.title}</strong>
-                    <small>
-                      버전 {r.revision} · {r.approved_name} ·{" "}
-                      {formatDate(r.created_at)}
-                    </small>
-                  </div>
-                  <ArrowUpRight size={17} />
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <Empty
-              title="확정된 보고서가 없습니다."
-              description="점검·장애 상세에서 업무를 완료한 후 보고서를 확정하세요."
+        <div className="list-toolbar">
+          <input
+            aria-label="문서 검색"
+            placeholder="제목 검색"
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPage(1);
+            }}
+          />
+          <label>
+            시작일
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => {
+                setFrom(e.target.value);
+                setPage(1);
+              }}
             />
-          )
-        ) : docs.length ? (
+          </label>
+          <label>
+            종료일
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+          {tab === "documents" && (
+            <select
+              aria-label="문서 분류 필터"
+              value={classification}
+              onChange={(e) => {
+                setClassification(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">모든 분류</option>
+              {Object.entries(classificationNames).map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        {!data ? (
+          <Loading />
+        ) : data.rows.length ? (
           <div className="document-list">
-            {docs.map((d) => (
+            {data.rows.map((d) => (
               <div className="document-row" key={d.id}>
-                <span className="document-icon">
-                  <Paperclip />
-                </span>
                 <div>
-                  <a className="primary-cell" href={"/api/documents/" + d.id}>
-                    {d.name}
-                  </a>
-                  <small>
-                    {catalog[d.entity_kind]?.singular} ·{" "}
-                    {formatDate(d.created_at)} ·{" "}
-                    {Math.round(d.size_bytes / 1024)} KB
-                  </small>
+                  {tab === "reports" ? (
+                    <Link href={"/reports/" + d.id}>
+                      <strong>{d.title}</strong>
+                      <small>
+                        {d.audience === "customer"
+                          ? "고객 제출용"
+                          : "내부 검토용"}{" "}
+                        · 버전 {d.revision} · {formatDate(d.created_at)}
+                      </small>
+                    </Link>
+                  ) : (
+                    <DocumentDownload doc={d as DocumentView} />
+                  )}
                 </div>
                 <Link
                   className="text-link"
                   href={`/${d.entity_kind}/${d.entity_id}`}
                 >
-                  관련 기록 <ArrowUpRight size={14} />
+                  관련 기록
                 </Link>
+                {tab === "documents" && can(user.role, "reports:approve") && (
+                  <select
+                    aria-label={`${d.name} 분류 변경`}
+                    value={d.classification}
+                    onChange={async (e) => {
+                      try {
+                        await api("/api/documents/" + d.id, {
+                          method: "PATCH",
+                          body: JSON.stringify({
+                            classification: e.target.value,
+                            version: d.version,
+                            rescan: d.scan_status === "error",
+                          }),
+                        });
+                        refresh((n) => n + 1);
+                      } catch (e) {
+                        setError((e as Error).message);
+                      }
+                    }}
+                  >
+                    {Object.entries(classificationNames).map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
             ))}
           </div>
         ) : (
-          <Empty
-            title="첨부 자료가 없습니다."
-            description="고객·자산·작업 상세에서 문서와 사진을 첨부할 수 있습니다."
-          />
+          <Empty title="조건에 맞는 문서가 없습니다." />
         )}
+        <Pager page={page} total={data?.total || 0} onPage={setPage} />
       </section>
     </>
+  );
+}
+export function Pager({
+  page,
+  total,
+  onPage,
+  limit = 20,
+}: {
+  page: number;
+  total: number;
+  onPage: (page: number) => void;
+  limit?: number;
+}) {
+  return (
+    <div className="table-footer">
+      <span>
+        총 <strong>{total}</strong>건
+      </span>
+      <div>
+        <button
+          className="button small"
+          aria-label="이전 페이지"
+          disabled={page <= 1}
+          onClick={() => onPage(page - 1)}
+        >
+          이전
+        </button>
+        <span>
+          {page} / {Math.max(1, Math.ceil(total / limit))}
+        </span>
+        <button
+          className="button small"
+          aria-label="다음 페이지"
+          disabled={page * limit >= total}
+          onClick={() => onPage(page + 1)}
+        >
+          다음
+        </button>
+      </div>
+    </div>
   );
 }

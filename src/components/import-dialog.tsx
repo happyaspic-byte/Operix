@@ -1,11 +1,14 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { X, Upload, Download, Check } from "lucide-react";
+import { catalog } from "@/lib/catalog";
 import { api, ErrorNotice } from "./ui";
 export function ImportDialog({
   onClose,
   onDone,
+  kind = "assets",
 }: {
+  kind?: string;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -18,6 +21,11 @@ export function ImportDialog({
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
+  function close() {
+    if (busy) return;
+    if (file && !window.confirm("가져오기 내용을 버리고 닫을까요?")) return;
+    onClose();
+  }
   async function check() {
     if (!file) return;
     setBusy(true);
@@ -25,6 +33,7 @@ export function ImportDialog({
     try {
       const form = new FormData();
       form.set("file", file);
+      form.set("kind", kind);
       form.set("mapping", JSON.stringify(mapping));
       setPreview(await api("/api/import", { method: "POST", body: form }));
     } catch (e) {
@@ -49,19 +58,27 @@ export function ImportDialog({
     }
   }
   return (
-    <dialog className="editor-dialog" ref={dialog} onCancel={onClose}>
+    <dialog
+      className="editor-dialog"
+      ref={dialog}
+      onCancel={(e) => {
+        e.preventDefault();
+        close();
+      }}
+    >
       <div className="dialog-heading">
-        <h2>엑셀에서 자산 가져오기</h2>
-        <button className="icon-button" aria-label="닫기" onClick={onClose}>
+        <h2>엑셀에서 {catalog[kind].singular} 가져오기</h2>
+        <button className="icon-button" aria-label="닫기" onClick={close}>
           <X size={20} />
         </button>
       </div>
       <div className="dialog-body">
         <p className="muted">
           표준 양식을 사용하거나 열을 연결한 뒤, 변경 내용을 확인하고
-          반영하세요. 최대 1,000행 · 5MB.
+          반영하세요. 최대 1,000행 · 5MB. 이 기능은 목록 이관용이며
+          첨부·보고서·권한을 포함한 전체 백업을 대신하지 않습니다.
         </p>
-        <a className="button small" href="/api/import">
+        <a className="button small" href={"/api/import?kind=" + kind}>
           <Download size={15} />
           표준 양식 내려받기
         </a>
@@ -80,34 +97,27 @@ export function ImportDialog({
         {preview && (
           <>
             <div className="import-mapping">
-              {[
-                ["site_id", "사업장 ID"],
-                ["name", "자산명"],
-                ["asset_tag", "자산 ID"],
-                ["product", "제품"],
-                ["model", "모델"],
-                ["software_version", "소프트웨어 버전"],
-                ["protection", "보호 모드"],
-                ["status", "확인 상태"],
-              ].map(([key, label]) => (
-                <label key={key}>
-                  {label}
-                  <select
-                    value={mapping[key] || label}
-                    onChange={(e) => {
-                      setMapping({ ...mapping, [key]: e.target.value });
-                      setPreview({ ...preview, valid: false });
-                    }}
-                  >
-                    <option value={label}>{label}</option>
-                    {preview.headers
-                      .filter((h: string) => h !== label)
-                      .map((h: string) => (
-                        <option key={h}>{h}</option>
-                      ))}
-                  </select>
-                </label>
-              ))}
+              {Object.entries(preview.mapping as Record<string, string>).map(
+                ([key, label]) => (
+                  <label key={key}>
+                    {label}
+                    <select
+                      value={mapping[key] || label}
+                      onChange={(e) => {
+                        setMapping({ ...mapping, [key]: e.target.value });
+                        setPreview({ ...preview, valid: false });
+                      }}
+                    >
+                      <option value={label}>{label}</option>
+                      {preview.headers
+                        .filter((h: string) => h !== label)
+                        .map((h: string) => (
+                          <option key={h}>{h}</option>
+                        ))}
+                    </select>
+                  </label>
+                ),
+              )}
             </div>
             <div className="import-summary">
               검토 대상 {preview.rows.length}행 · 오류{" "}
@@ -135,7 +145,21 @@ export function ImportDialog({
                             ? "수정"
                             : "오류"}
                       </td>
-                      <td>{row.error || row.site_name}</td>
+                      <td>
+                        {row.error || (
+                          <details>
+                            <summary>
+                              변경 {row.changes?.length || 0}개 보기
+                            </summary>
+                            {row.changes?.map((c: any) => (
+                              <p key={c.field}>
+                                {c.label}: {JSON.stringify(c.before)} →{" "}
+                                {JSON.stringify(c.after)}
+                              </p>
+                            ))}
+                          </details>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -145,7 +169,7 @@ export function ImportDialog({
         )}
       </div>
       <div className="dialog-footer">
-        <button className="button" onClick={onClose}>
+        <button className="button" onClick={close}>
           취소
         </button>
         <div>

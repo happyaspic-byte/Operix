@@ -14,11 +14,11 @@ export default function Login() {
     setBusy(true);
     setError("");
     try {
-      await api("/api/auth/login", {
+      const result = await api("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
       });
-      router.replace("/dashboard");
+      router.replace(result.must_change_password ? "/account" : "/dashboard");
       router.refresh();
     } catch (e) {
       setError((e as Error).message);

@@ -6,7 +6,7 @@
 
 ![Operix dashboard](docs/screenshots/dashboard-desktop.jpg)
 
-## 첫 버전 기능
+## v0.2 기능
 
 - 고객사·사업장·담당자 관리.
 - 시스템 자산, everRun 노드·Endurance 구성요소, VM과 사양 관리.
@@ -20,11 +20,15 @@
 
 공개 저장소의 예제·화면·테스트에는 가상 자료만 사용합니다. 운영 자격증명과 실제 고객 자료는 저장소에 포함하지 않습니다.
 
-## 검증 결과
+## 개선과 검증
 
-데이터·권한 테스트 **28/28**, 브라우저·API 시나리오 **11/11** 통과. PostgreSQL 17과 Docker에서 컨테이너 교체, DB·첨부 파일 유지, 백업·복구 스크립트까지 확인했습니다.
+첨부 진단 33개 항목을 추적해 보안·관계 무결성·조회·업무 화면·복구 절차를 개선했습니다. 코드 개선 범위 기준 **완료 13개 · 부분 완료 19개 · 후속 확장 1개**입니다.
 
-1차 MVP 자체 평가 **83/100**. [검증 근거·남은 항목](docs/VERIFICATION.md) · [GitHub 자동 검증](https://github.com/happyaspic-byte/Operix/actions/runs/33921994798) · [ERP 비교](docs/COMPARISON.md).
+문서 기밀등급/ClamAV 격리, 개인정보 보유·파기와 복구 후 재적용, 접속기록 점검, 본인 비밀번호/세션 관리, 인수인계, SLA·주월 일정·후속 티켓, 다중 고객 담당자, 필터 내보내기와 확대된 가져오기를 제공합니다.
+
+[33개 개선 추적표](docs/IMPROVEMENTS-2026-09-05.md) · [실행 결과·점수·화면](docs/VERIFICATION.md) · [자동 검증](https://github.com/happyaspic-byte/Operix/actions/workflows/ci.yml) · [ERP 비교](docs/COMPARISON.md).
+
+회사별 개인정보 정책·MFA/IdP·HTTPS/VPN·외부 로그/백업·RPO/RTO 및 현장 인수는 남아 있습니다. 완료 항목 수는 전사 ERP 완성도나 운영 승인 점수가 아닙니다.
 
 ## 사내 Ubuntu 설치
 
@@ -32,15 +36,15 @@
 
 ```bash
 cp .env.example .env
-# 실제 접속 주소와 관리자·DB 비밀번호·세션 키를 설정하세요.
+# 실제 HTTPS 주소, 관리자·DB 비밀번호, 서로 다른 세션·접속기록 키를 설정하세요.
 docker compose up --build -d
 ```
 
-PostgreSQL이 준비되면 스키마와 최초 관리자 계정을 생성한 뒤 웹과 일정 처리기가 실행됩니다. 운영에서는 SEED_DEMO=0을 사용합니다. 외부 접속은 사내 HTTPS 프록시와 승인된 VPN 구성을 이용합니다.
+PostgreSQL이 준비되면 스키마와 최초 관리자 계정을 생성한 뒤 웹과 일정 처리기가 실행됩니다. ClamAV 검사기도 함께 구성됩니다. 운영에서는 SEED_DEMO=0을 사용합니다. 외부 접속은 사내 HTTPS 프록시와 승인된 VPN 구성을 이용합니다.
 
 ## 로컬 개발·검증
 
-Node.js 24 권장. Docker 없이 확인할 때만 PGlite를 명시적으로 활성화합니다.
+Node.js 24 필수. Docker 없이 확인할 때만 PGlite를 명시적으로 활성화합니다.
 
 ```bash
 npm ci
@@ -53,10 +57,12 @@ npm run dev
 로컬 계정은 admin@operix.test이며 비밀번호는 setup:local이 무작위로 생성해 .env의 ADMIN_PASSWORD에 저장합니다. 운영 계정에는 이 로컬 설정을 재사용하지 마세요.
 
 ```bash
+npm run typecheck
+npm run lint
 npm test
 npm run build
 npx playwright install chromium
-E2E_START_SERVER=1 npm run test:e2e
+FILE_SCAN_MODE=test E2E_START_SERVER=1 npm run test:e2e
 ```
 
 단위·DB 검증은 기본적으로 별도 메모리 DB를 사용합니다. TEST_DATABASE_URL이 있으면 해당 별도 PostgreSQL DB를 이용합니다. GitHub Actions는 실제 PostgreSQL 17, Chromium, DB·첨부 파일 복구 및 Docker 컨테이너 기동을 검사합니다.
@@ -64,6 +70,7 @@ E2E_START_SERVER=1 npm run test:e2e
 ## 문서
 
 - [개발 계획](docs/PLAN.md)
+- [이번 개선 항목 추적](docs/IMPROVEMENTS-2026-09-05.md)
 - [검증 결과와 평가](docs/VERIFICATION.md)
 - [다른 ERP와의 비교](docs/COMPARISON.md)
 - [설치와 운영](docs/DEPLOYMENT.md)

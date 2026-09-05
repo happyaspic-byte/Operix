@@ -18,6 +18,10 @@ export function RecordEditor({
   const user = useUser(),
     config = catalog[kind],
     dialog = useRef<HTMLDialogElement>(null),
+    baseline = useRef(""),
+    versionRef = useRef(initial?.version),
+    [conflict, setConflict] = useState<Record<string, any> | null>(null),
+    [relationSearch, setRelationSearch] = useState<Record<string, string>>({}),
     [data, setData] = useState<Record<string, any>>({}),
     [lookup, setLookup] = useState<Record<string, any[]>>({}),
     [error, setError] = useState(""),
@@ -33,7 +37,9 @@ export function RecordEditor({
             : f.type === "select"
               ? f.options?.[0][0]
               : f.type === "number"
-                ? f.min || ""
+                ? f.key === "notice_days"
+                  ? 90
+                  : f.min || ""
                 : "";
       if (f.type === "date" && v) v = String(v).slice(0, 10);
       if (f.type === "select" && v) v = String(v);
@@ -42,11 +48,62 @@ export function RecordEditor({
     if (!initial?.id && kind === "assets" && !initial?.status)
       values.status = "unknown";
     setData(values);
-    api("/api/lookups")
+    baseline.current = JSON.stringify(values);
+    api(
+      "/api/lookups?" +
+        new URLSearchParams({
+          current_kind: kind,
+          current_id: initial?.id || "",
+        }),
+    )
       .then(setLookup)
       .catch((e) => setError(e.message));
     dialog.current?.showModal();
   }, [kind, initial?.id]);
+  const dirty = JSON.stringify(data) !== baseline.current;
+  useEffect(() => {
+    function warn(e: BeforeUnloadEvent) {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    }
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  function close() {
+    if (busy) return;
+    if (
+      dirty &&
+      !window.confirm(
+        "저장하지 않은 내용이 있습니다. 변경 내용을 버리고 닫을까요?",
+      )
+    )
+      return;
+    onClose();
+  }
+  async function searchRelation(entity: string, value: string) {
+    setRelationSearch((s) => ({ ...s, [entity]: value }));
+    try {
+      const next = await api(
+        "/api/lookups?" +
+          new URLSearchParams({
+            entity,
+            q: value,
+            current_kind: kind,
+            current_id: initial?.id || "",
+          }),
+      );
+      setLookup((old) => ({ ...old, ...next }));
+    } catch (e) {
+      if ((e as Error & { status?: number }).status === 409 && initial?.id) {
+        try {
+          setConflict(await api(`/api/data/${kind}/${initial.id}`));
+        } catch {}
+      }
+      setError((e as Error).message);
+    }
+  }
   function update(key: string, value: any) {
     setData((d) => ({
       ...d,
@@ -63,7 +120,7 @@ export function RecordEditor({
       for (const f of config.fields)
         if (!f.permission || can(user.role, f.permission))
           payload[f.key] = data[f.key];
-      if (initial?.id) payload.version = initial.version;
+      if (initial?.id) payload.version = versionRef.current;
       const saved = await api(
         `/api/data/${kind}${initial?.id ? "/" + initial.id : ""}`,
         {
@@ -87,26 +144,38 @@ export function RecordEditor({
           ? f.options || []
           : (lookup[f.entity!] || []).map((r) => [
               r.id,
-              (r.customer_name ? r.customer_name + " · " : "") + r.name,
+              (r.customer_name ? r.customer_name + " · " : "") +
+                r.name +
+                (r.status === "archived" ? " (보관·비활성 · 기존 연결)" : ""),
             ]);
       if (f.key === "assignee_id" && user.role === "engineer")
         choices = choices.filter((c) => c[0] === user.id);
       return (
-        <select
-          id={id}
-          value={value}
-          required={f.required}
-          onChange={(e) => update(f.key, e.target.value)}
-        >
-          {(!f.required || f.type === "relation") && (
-            <option value="">선택해 주세요</option>
+        <>
+          {f.type === "relation" && (
+            <input
+              aria-label={f.label + " 후보 검색"}
+              placeholder="후보 검색 (최대 100건)"
+              value={relationSearch[f.entity!] || ""}
+              onChange={(e) => searchRelation(f.entity!, e.target.value)}
+            />
           )}
-          {choices.map(([v, l]) => (
-            <option value={v} key={v}>
-              {l}
-            </option>
-          ))}
-        </select>
+          <select
+            id={id}
+            value={value}
+            required={f.required}
+            onChange={(e) => update(f.key, e.target.value)}
+          >
+            {(!f.required || f.type === "relation") && (
+              <option value="">선택해 주세요</option>
+            )}
+            {choices.map(([v, l]) => (
+              <option value={v} key={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </>
       );
     }
     if (f.type === "textarea")
@@ -235,8 +304,11 @@ export function RecordEditor({
     <dialog
       ref={dialog}
       className="editor-dialog"
-      onCancel={onClose}
-      onClose={onClose}
+      onCancel={(e) => {
+        e.preventDefault();
+        close();
+      }}
+      onClose={close}
     >
       <form onSubmit={submit}>
         <div className="dialog-heading">
@@ -252,13 +324,83 @@ export function RecordEditor({
             type="button"
             className="icon-button"
             aria-label="닫기"
-            onClick={onClose}
+            onClick={close}
           >
             <X size={20} />
           </button>
         </div>
         <div className="dialog-body">
+          <p className="footnote">
+            입력 중인 내용은 이 화면에만 유지됩니다. 로그인 만료 시 다른 탭에서
+            다시 로그인한 뒤 저장하세요. 탭을 닫으면 입력 내용이 사라집니다.
+          </p>
           <ErrorNotice message={error} />
+          {conflict && (
+            <div className="privacy-preview">
+              <h3>다른 사용자의 수정과 비교</h3>
+              <p>
+                필요한 값을 입력란에 반영한 뒤 최신 버전으로 다시 저장하세요.
+              </p>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>항목</th>
+                      <th>서버의 현재 값</th>
+                      <th>내 입력</th>
+                      <th>선택</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {config.fields
+                      .filter(
+                        (f) => !f.permission || can(user.role, f.permission),
+                      )
+                      .filter(
+                        (f) =>
+                          JSON.stringify(conflict[f.key]) !==
+                          JSON.stringify(data[f.key]),
+                      )
+                      .map((f) => (
+                        <tr key={f.key}>
+                          <td>{f.label}</td>
+                          <td>{JSON.stringify(conflict[f.key])}</td>
+                          <td>{JSON.stringify(data[f.key])}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="button small"
+                              onClick={() =>
+                                update(
+                                  f.key,
+                                  f.type === "select"
+                                    ? String(conflict[f.key])
+                                    : (conflict[f.key] ?? ""),
+                                )
+                              }
+                            >
+                              서버 값 사용
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+              <button
+                type="button"
+                className="button"
+                onClick={() => {
+                  versionRef.current = conflict.version;
+                  setConflict(null);
+                  setError("차이를 검토했습니다. 저장 버튼으로 반영해 주세요.");
+                }}
+              >
+                현재 입력으로 검토 완료
+              </button>
+            </div>
+          )}
+
           <div className="form-grid">
             {config.fields
               .filter((f) => !f.permission || can(user.role, f.permission))
@@ -284,7 +426,7 @@ export function RecordEditor({
             <button
               type="button"
               className="button"
-              onClick={onClose}
+              onClick={close}
               disabled={busy}
             >
               취소

@@ -1,14 +1,22 @@
 import { getDb } from "./db";
+import { lockBusiness } from "./transactions";
 import { todayKST, dayDiff, recurringDate, addDays } from "./dates";
 export async function runJobs(today = todayKST()) {
   const db = await getDb();
   try {
     return await db.transaction(async (tx) => {
-      await tx.query("SELECT id FROM job_runs WHERE id='scheduler' FOR UPDATE");
+      await tx.query("SET LOCAL statement_timeout='30s'");
+      await tx.query("SET LOCAL lock_timeout='10s'");
+      const locked = await tx.query(
+        "SELECT id FROM job_runs WHERE id='scheduler' FOR UPDATE SKIP LOCKED",
+      );
+      if (!locked.length) return { created: 0, notified: 0, skipped: true };
+      await lockBusiness(tx);
+      await tx.query("SET LOCAL statement_timeout='30s'");
       let created = 0,
         notified = 0;
       const plans = await tx.query(
-        "SELECT * FROM maintenance_plans WHERE status='active'",
+        "SELECT p.*,CASE WHEN ass.active THEN p.assignee_id ELSE NULL END effective_assignee_id FROM maintenance_plans p LEFT JOIN users ass ON ass.id=p.assignee_id JOIN assets a ON a.id=p.asset_id JOIN sites s ON s.id=a.site_id JOIN customers c ON c.id=s.customer_id WHERE p.status='active' AND a.status<>'archived' AND s.status='active' AND c.status='active'",
       );
       for (const plan of plans) {
         let index = plan.next_index;
@@ -28,7 +36,7 @@ export async function runJobs(today = todayKST()) {
               plan.id,
               plan.name,
               date,
-              plan.assignee_id,
+              plan.effective_assignee_id,
               JSON.stringify(
                 plan.checklist.map((c: any) => ({ ...c, checked: false })),
               ),
@@ -42,6 +50,9 @@ export async function runJobs(today = todayKST()) {
           [plan.id, index],
         );
       }
+      await tx.query(
+        "DELETE FROM notifications n WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id=n.user_id AND u.active=true)",
+      );
       const managers = await tx.query(
         "SELECT id FROM users WHERE active=true AND role IN ('admin','manager')",
       );
@@ -51,12 +62,24 @@ export async function runJobs(today = todayKST()) {
       for (const c of contracts) {
         const days = dayDiff(c.end_date, today);
         const bucket =
-          days < 0 ? -1 : [0, 7, 30, 60, 90].find((n) => days <= n);
-        if (bucket === undefined) continue;
+          days < 0
+            ? -1
+            : [...new Set([0, 7, 30, 60, 90, c.notice_days])]
+                .sort((a, b) => a - b)
+                .find((n) => days <= n);
+        if (bucket === undefined || days > c.notice_days) continue;
         const users = [
           ...new Set([
             ...managers.map((u) => u.id),
-            ...(c.owner_id ? [c.owner_id] : []),
+            ...(c.owner_id &&
+            (
+              await tx.query(
+                "SELECT id FROM users WHERE id=$1 AND active=true",
+                [c.owner_id],
+              )
+            ).length
+              ? [c.owner_id]
+              : []),
           ]),
         ];
         for (const uid of users) {
@@ -84,7 +107,14 @@ export async function runJobs(today = todayKST()) {
       for (const i of inspections) {
         const days = dayDiff(i.planned_date, today),
           bucket = days < 0 ? "overdue" : days === 0 ? "today" : "soon";
-        const users = i.assignee_id
+        const activeAssignee =
+          i.assignee_id &&
+          (
+            await tx.query("SELECT id FROM users WHERE id=$1 AND active=true", [
+              i.assignee_id,
+            ])
+          ).length;
+        const users = activeAssignee
           ? [i.assignee_id]
           : managers.map((u) => u.id);
         for (const uid of users) {
@@ -105,10 +135,48 @@ export async function runJobs(today = todayKST()) {
           notified += added.length;
         }
       }
+      const breached = await tx.query(
+        "SELECT * FROM tickets WHERE status NOT IN ('resolved','closed') AND ((first_response_at IS NULL AND response_due_at<now()) OR resolution_due_at<now())",
+      );
+      for (const ticket of breached) {
+        for (const manager of managers) {
+          const added = await tx.query(
+            "INSERT INTO notifications(id,user_id,source_kind,source_id,fingerprint,title,body,href) VALUES ($1,$2,'tickets',$3,$4,$5,$6,$7) ON CONFLICT(user_id,fingerprint) DO NOTHING RETURNING id",
+            [
+              crypto.randomUUID(),
+              manager.id,
+              ticket.id,
+              "sla:" +
+                ticket.id +
+                ":" +
+                (ticket.first_response_at ? "resolution" : "response"),
+              ticket.name,
+              "응답 또는 해결 목표 시간이 지났습니다.",
+              "/tickets/" + ticket.id,
+            ],
+          );
+          notified += added.length;
+        }
+      }
+      await tx.query(
+        "DELETE FROM notifications n WHERE source_kind='tickets' AND EXISTS(SELECT 1 FROM tickets t WHERE t.id=n.source_id AND t.status IN ('resolved','closed'))",
+      );
       await tx.query(
         "DELETE FROM notifications n WHERE n.source_kind='inspections' AND EXISTS(SELECT 1 FROM inspections i WHERE i.id=n.source_id AND i.status IN ('completed','cancelled'))",
       );
-      await tx.query("DELETE FROM sessions WHERE expires_at<now()");
+      await tx.query(
+        "DELETE FROM notifications n WHERE n.source_kind='contracts' AND EXISTS(SELECT 1 FROM contracts c WHERE c.id=n.source_id AND (c.status='archived' OR c.renewal IN ('renewed','ended')))",
+      );
+      await tx.query(
+        "DELETE FROM sessions WHERE expires_at<now() OR last_seen_at<now()-interval '8 hours'",
+      );
+      await tx.query("DELETE FROM download_grants WHERE expires_at<now()");
+      await tx.query(
+        "UPDATE import_batches SET payload='[]' WHERE committed_at IS NOT NULL AND payload<>'[]'::jsonb",
+      );
+      await tx.query(
+        "DELETE FROM notifications WHERE read_at<now()-interval '90 days'",
+      );
       await tx.query(
         "DELETE FROM login_attempts WHERE window_start<now()-interval '1 day'",
       );
@@ -123,7 +191,7 @@ export async function runJobs(today = todayKST()) {
   } catch (e) {
     await db.query(
       "UPDATE job_runs SET last_error=$1,updated_at=now() WHERE id='scheduler'",
-      [e instanceof Error ? e.message : "Unknown"],
+      ["scheduler_failed"],
     );
     throw e;
   }

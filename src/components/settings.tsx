@@ -10,6 +10,8 @@ import {
   Activity,
 } from "lucide-react";
 import { api, ErrorNotice, Loading, Badge } from "./ui";
+import { OperationsSettings } from "./operations-settings";
+import { PrivacySettings } from "./privacy-settings";
 import { roles, roleNames } from "@/lib/policy";
 export function Settings() {
   const [data, setData] = useState<any>(null),
@@ -161,6 +163,8 @@ export function Settings() {
           </table>
         </div>
       </section>
+      <OperationsSettings users={data.users} health={data.health} />
+      <PrivacySettings />
       {editor && (
         <UserEditor
           initial={editor}

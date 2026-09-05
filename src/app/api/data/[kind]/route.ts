@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { assertOrigin, requireUser } from "@/lib/auth";
 import { listRecords, saveRecord } from "@/lib/records";
+import { securityLog } from "@/lib/security";
 import { failure, readJson } from "@/lib/http";
 export async function GET(
   request: Request,
@@ -8,13 +9,14 @@ export async function GET(
 ) {
   try {
     const user = await requireUser();
-    return NextResponse.json(
-      await listRecords(
-        (await params).kind,
-        user,
-        new URL(request.url).searchParams,
-      ),
+    const kind = (await params).kind,
+      result = await listRecords(kind, user, new URL(request.url).searchParams);
+    await securityLog(
+      user,
+      { action: "list", kind, ids: result.rows.map((r) => r.id) },
+      request,
     );
+    return NextResponse.json(result);
   } catch (e) {
     return failure(e);
   }

@@ -27,6 +27,16 @@ function normalize(rows: Row[]) {
   );
 }
 let pending: Promise<Database> | undefined;
+let metricsPool: Pool | undefined;
+export function poolMetrics() {
+  return metricsPool
+    ? {
+        total: metricsPool.totalCount,
+        idle: metricsPool.idleCount,
+        waiting: metricsPool.waitingCount,
+      }
+    : null;
+}
 export async function getDb(): Promise<Database> {
   if (!pending) pending = connect();
   return pending;
@@ -36,7 +46,15 @@ async function connect(): Promise<Database> {
     const pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       max: 8,
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000,
+      statement_timeout: 30000,
+      query_timeout: 35000,
     });
+    metricsPool = pool;
+    pool.on("error", () =>
+      console.error(JSON.stringify({ event: "operix.database.pool_error" })),
+    );
     const wrap = (client: any): Database => ({
       query: async (sql, params = []) =>
         normalize((await client.query(sql, params)).rows) as any,

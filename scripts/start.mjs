@@ -1,3 +1,4 @@
+import "./runtime-guard.mjs";
 import { cpSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -10,6 +11,7 @@ const env = { ...process.env, HOSTNAME: "0.0.0.0" };
 if (env.PGLITE_PATH && !env.PGLITE_PATH.startsWith("memory://"))
   env.PGLITE_PATH = resolve(env.PGLITE_PATH);
 if (env.UPLOAD_DIR) env.UPLOAD_DIR = resolve(env.UPLOAD_DIR);
+env.SECURITY_LOG_DIR = resolve(env.SECURITY_LOG_DIR || "storage/security");
 const child = spawn(process.execPath, [".next/standalone/server.js"], {
   stdio: "inherit",
   env,
