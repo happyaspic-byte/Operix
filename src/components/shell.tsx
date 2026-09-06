@@ -39,7 +39,7 @@ export function Shell({
 }) {
   const pathname = usePathname(),
     router = useRouter();
-  const sidebar = useRef<HTMLElement>(null);
+  const sidebar = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState(false),
     [q, setQ] = useState(""),
@@ -153,11 +153,11 @@ export function Shell({
             onClick={() => setMenu(false)}
           />
         )}
-        <aside
+        <div
           ref={sidebar}
           id="workspace-navigation"
           className={`sidebar ${menu ? "is-open" : ""}`}
-          role={menu ? "dialog" : undefined}
+          role={menu ? "dialog" : "complementary"}
           aria-modal={menu ? true : undefined}
           aria-label="업무 탐색"
         >
@@ -238,7 +238,7 @@ export function Shell({
               </button>
             </div>
           </div>
-        </aside>
+        </div>
         <div className="main-wrap" inert={menu}>
           <header className="topbar">
             <div className="breadcrumb">
