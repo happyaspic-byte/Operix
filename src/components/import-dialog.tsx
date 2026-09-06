@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useModalDialog } from "./use-modal-dialog";
 import { X, Upload, Download, Check } from "lucide-react";
 import { api, ErrorNotice } from "./ui";
 export function ImportDialog({
@@ -9,15 +10,12 @@ export function ImportDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null),
+  const dialog = useModalDialog(),
     [file, setFile] = useState<File | null>(null),
     [preview, setPreview] = useState<any>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [mapping, setMapping] = useState<Record<string, string>>({});
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
   async function check() {
     if (!file) return;
     setBusy(true);
@@ -49,10 +47,24 @@ export function ImportDialog({
     }
   }
   return (
-    <dialog className="editor-dialog" ref={dialog} onCancel={onClose}>
+    <dialog
+      className="editor-dialog"
+      ref={dialog}
+      aria-labelledby="import-dialog-title"
+      aria-busy={busy}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onClose();
+      }}
+    >
       <div className="dialog-heading">
-        <h2>엑셀에서 자산 가져오기</h2>
-        <button className="icon-button" aria-label="닫기" onClick={onClose}>
+        <h2 id="import-dialog-title">엑셀에서 자산 가져오기</h2>
+        <button
+          className="icon-button"
+          aria-label="닫기"
+          disabled={busy}
+          onClick={onClose}
+        >
           <X size={20} />
         </button>
       </div>
@@ -145,7 +157,7 @@ export function ImportDialog({
         )}
       </div>
       <div className="dialog-footer">
-        <button className="button" onClick={onClose}>
+        <button className="button" disabled={busy} onClick={onClose}>
           취소
         </button>
         <div>

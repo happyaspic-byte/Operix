@@ -24,6 +24,7 @@ export function EntityList({ entity }: { entity: string }) {
     [page, setPage] = useState(1),
     [data, setData] = useState<any>(null),
     [error, setError] = useState(""),
+    [loading, setLoading] = useState(true),
     [editor, setEditor] = useState(false),
     [importer, setImporter] = useState(false),
     [revision, setRevision] = useState(0),
@@ -39,6 +40,9 @@ export function EntityList({ entity }: { entity: string }) {
   }, [entity]);
   useEffect(() => {
     const c = new AbortController();
+    setLoading(true);
+    setData(null);
+    setError("");
     const timer = setTimeout(
       () => {
         api(
@@ -51,6 +55,9 @@ export function EntityList({ entity }: { entity: string }) {
           })
           .catch((e) => {
             if (e.name !== "AbortError") setError(e.message);
+          })
+          .finally(() => {
+            if (!c.signal.aborted) setLoading(false);
           });
       },
       query ? 200 : 0,
@@ -84,6 +91,12 @@ export function EntityList({ entity }: { entity: string }) {
       setError("이 브라우저에서는 보기 설정을 저장할 수 없습니다.");
     }
   }
+  function clearFilters() {
+    setQuery("");
+    setStatus("");
+    setPage(1);
+  }
+  const filtered = Boolean(query || status);
   const statusField = config.fields.find((f) => f.key === "status");
   const tabs =
     entity === "customers"
@@ -275,41 +288,53 @@ export function EntityList({ entity }: { entity: string }) {
           >
             현재 필터 저장
           </button>
+          {filtered && (
+            <button className="button small" onClick={clearFilters}>
+              검색·필터 초기화
+            </button>
+          )}
           <small>보기 설정은 이 브라우저에 저장됩니다.</small>
         </div>
         <ErrorNotice message={error} />
-        {data ? (
-          <RecordTable kind={kind} rows={data.rows} visibleColumns={columns} />
-        ) : (
+        {loading ? (
           <Loading />
-        )}
-        <div className="table-footer">
-          <span>
-            총 <strong>{data?.total ?? 0}</strong>건
-            {kind === "assets" ? " · 최근 확인 상태 기준" : ""}
-          </span>
-          <div>
-            <button
-              className="icon-button"
-              aria-label="이전 페이지"
-              disabled={page === 1}
-              onClick={() => setPage(page - 1)}
-            >
-              <ChevronLeft size={16} />
-            </button>
+        ) : data ? (
+          <RecordTable
+            kind={kind}
+            rows={data.rows}
+            visibleColumns={columns}
+            filtered={filtered}
+          />
+        ) : null}
+        {!loading && data && (
+          <div className="table-footer">
             <span>
-              {page} / {Math.max(1, Math.ceil((data?.total || 0) / 20))}
+              총 <strong>{data?.total ?? 0}</strong>건
+              {kind === "assets" ? " · 최근 확인 상태 기준" : ""}
             </span>
-            <button
-              className="icon-button"
-              aria-label="다음 페이지"
-              disabled={page * 20 >= (data?.total || 0)}
-              onClick={() => setPage(page + 1)}
-            >
-              <ChevronRight size={16} />
-            </button>
+            <div>
+              <button
+                className="icon-button"
+                aria-label="이전 페이지"
+                disabled={page === 1}
+                onClick={() => setPage(page - 1)}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span>
+                {page} / {Math.max(1, Math.ceil((data?.total || 0) / 20))}
+              </span>
+              <button
+                className="icon-button"
+                aria-label="다음 페이지"
+                disabled={page * 20 >= (data?.total || 0)}
+                onClick={() => setPage(page + 1)}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
       {editor && (
         <RecordEditor

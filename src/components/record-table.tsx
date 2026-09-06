@@ -8,10 +8,12 @@ export function RecordTable({
   kind,
   rows,
   visibleColumns,
+  filtered = false,
 }: {
   kind: string;
   rows: any[];
   visibleColumns?: string[];
+  filtered?: boolean;
 }) {
   const config = catalog[kind];
   const columns = visibleColumns?.length
@@ -19,14 +21,38 @@ export function RecordTable({
         ([key]) => key === "name" || visibleColumns.includes(key),
       )
     : config.columns;
-  if (!rows.length) return <Empty />;
+  if (!rows.length)
+    return filtered ? (
+      <Empty
+        title="검색 조건에 맞는 자료가 없습니다."
+        description="검색어 또는 상태를 바꾸거나 검색·필터를 초기화해 주세요."
+      />
+    ) : (
+      <Empty />
+    );
   return (
-    <div className="table-scroll">
+    <div
+      className="table-scroll"
+      role="region"
+      aria-label={`${config.title} 표 · 가로 스크롤 가능`}
+      tabIndex={0}
+    >
       <table className="records-table">
+        <caption className="sr-only">{config.title} 목록</caption>
         <thead>
           <tr>
             {columns.map(([key, label]) => (
-              <th key={key}>{label}</th>
+              <th
+                scope="col"
+                key={key}
+                className={
+                  config.fields.find((f) => f.key === key)?.type === "number"
+                    ? "numeric-cell"
+                    : undefined
+                }
+              >
+                {label}
+              </th>
             ))}
             <th>
               <span className="sr-only">상세</span>
@@ -37,7 +63,14 @@ export function RecordTable({
           {rows.map((row) => (
             <tr key={row.id}>
               {columns.map(([key]) => (
-                <td key={key}>
+                <td
+                  key={key}
+                  className={
+                    config.fields.find((f) => f.key === key)?.type === "number"
+                      ? "numeric-cell"
+                      : undefined
+                  }
+                >
                   {key === "name" ? (
                     <Link
                       className="primary-cell record-name"
@@ -77,7 +110,9 @@ export function RecordTable({
                       }
                     />
                   ) : key.endsWith("_date") || key === "observed_at" ? (
-                    <span className="mono">{formatDate(row[key])}</span>
+                    <span className="mono date-cell">
+                      {formatDate(row[key])}
+                    </span>
                   ) : key === "customer_name" ? (
                     <>
                       <span>{row[key] || "—"}</span>

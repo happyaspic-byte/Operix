@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
   Building2,
@@ -39,6 +39,8 @@ export function Shell({
 }) {
   const pathname = usePathname(),
     router = useRouter();
+  const sidebar = useRef<HTMLElement>(null);
+  const menuButton = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState(false),
     [q, setQ] = useState(""),
     [results, setResults] = useState<any[]>([]),
@@ -85,6 +87,53 @@ export function Shell({
       controller.abort();
     };
   }, [q]);
+  useEffect(() => {
+    if (!menu) return;
+    const element = sidebar.current;
+    const media = window.matchMedia("(max-width: 760px)");
+    if (!media.matches) {
+      setMenu(false);
+      return;
+    }
+    const focusable = () =>
+      Array.from(
+        element?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), [tabindex="0"]',
+        ) || [],
+      );
+    focusable()[0]?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMenu(false);
+      }
+      if (event.key === "Tab") {
+        const items = focusable();
+        const first = items[0],
+          last = items[items.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    }
+    const resize = () => {
+      if (!media.matches) setMenu(false);
+    };
+    document.addEventListener("keydown", handleKey);
+    media.addEventListener("change", resize);
+    return () => {
+      document.removeEventListener("keydown", handleKey);
+      media.removeEventListener("change", resize);
+      document.body.style.overflow = previousOverflow;
+      if (media.matches) menuButton.current?.focus();
+    };
+  }, [menu]);
   async function logout() {
     await api("/api/auth/logout", { method: "POST" });
     router.push("/login");
@@ -100,10 +149,27 @@ export function Shell({
           <button
             className="sidebar-backdrop"
             aria-label="메뉴 닫기"
+            tabIndex={-1}
             onClick={() => setMenu(false)}
           />
         )}
-        <aside className={`sidebar ${menu ? "is-open" : ""}`}>
+        <aside
+          ref={sidebar}
+          id="workspace-navigation"
+          className={`sidebar ${menu ? "is-open" : ""}`}
+          role={menu ? "dialog" : undefined}
+          aria-modal={menu ? true : undefined}
+          aria-label="업무 탐색"
+        >
+          {menu && (
+            <button
+              className="icon-button mobile-nav-close"
+              aria-label="메뉴 닫기"
+              onClick={() => setMenu(false)}
+            >
+              <X size={20} />
+            </button>
+          )}
           <Link
             href="/dashboard"
             className="brand"
@@ -130,6 +196,9 @@ export function Shell({
               <Link
                 key={n.href}
                 className={`nav-item ${pathname.startsWith("/" + n.href) ? "active" : ""}`}
+                aria-current={
+                  pathname.startsWith("/" + n.href) ? "page" : undefined
+                }
                 href={"/" + n.href}
               >
                 <n.icon size={19} strokeWidth={1.8} />
@@ -170,12 +239,15 @@ export function Shell({
             </div>
           </div>
         </aside>
-        <div className="main-wrap">
+        <div className="main-wrap" inert={menu}>
           <header className="topbar">
             <div className="breadcrumb">
               <button
                 className="icon-button mobile-menu"
+                ref={menuButton}
                 aria-label="메뉴 열기"
+                aria-expanded={menu}
+                aria-controls="workspace-navigation"
                 onClick={() => setMenu(true)}
               >
                 <Menu size={20} />
