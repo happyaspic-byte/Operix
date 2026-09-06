@@ -51,7 +51,14 @@ export async function listRecords(
     params,
   );
   const limit = Math.min(100, Math.max(1, Number(query.get("limit")) || 20)),
-    page = Math.max(1, Number(query.get("page")) || 1);
+    page = Math.max(1, Number(query.get("page")) || 1),
+    offset = (page - 1) * limit;
+  if (
+    !Number.isSafeInteger(limit) ||
+    !Number.isSafeInteger(page) ||
+    !Number.isSafeInteger(offset)
+  )
+    throw new AppError(400, "페이지와 조회 개수는 유효한 정수 범위여야 합니다.");
   const sort = query.get("sort");
   const allowed = [
     "name",
@@ -64,7 +71,7 @@ export async function listRecords(
     direction = query.get("direction") === "asc" ? "ASC" : "DESC";
   const rows = await db.query(
     `${selection(kind)}${filter} ORDER BY e.${order} ${direction},e.id LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-    [...params, limit, (page - 1) * limit],
+    [...params, limit, offset],
   );
   return {
     rows: rows.map((r) => redact(r, user.role)),
