@@ -359,7 +359,7 @@ test("search and list filters return real persisted results", async ({
   await expect(page.getByRole("table")).toContainText("ASRS-DB");
   await page.getByLabel("상태 필터").selectOption("normal");
   await expect(
-    page.getByText("아직 등록된 정보가 없습니다.", { exact: true }),
+    page.getByText("검색 조건에 맞는 자료가 없습니다.", { exact: true }),
   ).toBeVisible();
   await page
     .getByRole("button", { name: "현재 필터 저장", exact: true })
