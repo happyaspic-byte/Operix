@@ -27,9 +27,28 @@ export function failure(error: unknown) {
   );
 }
 export async function readJson(request: Request) {
-  const text = await request.text();
-  if (text.length > 1024 * 1024)
-    throw new AppError(413, "입력 데이터가 너무 큽니다.");
+  let text = "";
+  const reader = request.body?.getReader();
+  if (reader) {
+    const decoder = new TextDecoder();
+    let bytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > 1024 * 1024) {
+          // Stop receiving before decoding or retaining an oversized chunk.
+          await reader.cancel().catch(() => {});
+          throw new AppError(413, "입력 데이터가 너무 큽니다.");
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } finally {
+      reader.releaseLock();
+    }
+  }
   try {
     return JSON.parse(text);
   } catch {
