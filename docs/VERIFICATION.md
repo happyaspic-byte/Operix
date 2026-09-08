@@ -2,7 +2,13 @@
 
 2026-09-05, 가상 자료로 검증했다. **도메인 63/63·브라우저 16/16 통과**, 실제 PostgreSQL 17·Docker·ClamAV·암호화 백업/복구 검증에 성공했다.
 
-첫 전체 실행: [GitHub Actions #3](https://github.com/happyaspic-byte/Operix/actions/runs/33948162707), 구현 커밋 [288c551](https://github.com/happyaspic-byte/Operix/commit/288c551c01aa4145b9db6ce7713306348f959790). application·container 작업 모두 성공. 최종 구현 검증: [GitHub Actions #8](https://github.com/happyaspic-byte/Operix/actions/runs/33948373808), 커밋 [eb60e1f](https://github.com/happyaspic-byte/Operix/commit/eb60e1f4554812b8a891aacaf635c4cf28b7afda). application·container 모두 성공했으며 KST 표시와 복구 실패 주입 검증을 포함한다. 이후 커밋은 이 결과 문서만 갱신한다.
+첫 전체 실행: [GitHub Actions #3](https://github.com/happyaspic-byte/Operix/actions/runs/33948162707), 구현 커밋 [288c551](https://github.com/happyaspic-byte/Operix/commit/288c551c01aa4145b9db6ce7713306348f959790). application·container 작업 모두 성공. 당시 최종 구현 검증: [GitHub Actions #8](https://github.com/happyaspic-byte/Operix/actions/runs/33948373808), 커밋 [eb60e1f](https://github.com/happyaspic-byte/Operix/commit/eb60e1f4554812b8a891aacaf635c4cf28b7afda). application·container 모두 성공했으며 KST 표시와 복구 실패 주입 검증을 포함한다. 이어지는 `6c7d5d9`까지는 이 결과 문서를 갱신한 구간이다. 아래 결과·점수·화면은 9월 5일 검증 기록이다.
+
+## 2026-09-08 worktree 통합 검증
+
+통합 기준 `6c7d5d9`에 UI·보안·버그 수정·문서 worktree를 병합한 커밋은 `afdcc78`이다. 후속 테스트 수정까지 포함한 `a696ea7`의 전체 브라우저·API 검증은 새 PostgreSQL 17 앱 DB에서 **33/33 통과**했으며 재시도·건너뜀은 없다. 별도 PostgreSQL 테스트 DB의 단위·DB 검증 **110/110**, 타입 검사·lint·빌드도 통과했다. 앱 구현은 `9ce2966` 이후 바뀌지 않았다.
+
+[통합 기록](INTEGRATION-2026-09-08.md)에 실행별 코드 기준·환경·명령·로컬 결과를 구분한다. 커밋별 원격 결과는 [GitHub Actions](https://github.com/happyaspic-byte/Operix/actions/workflows/ci.yml)에서 확인한다. 개별 worktree의 과거 통과 결과를 합산하거나 9월 5일의 Docker·ClamAV·복구·CI 결과를 새 통합 검증으로 간주하지 않는다.
 
 ## 결과와 근거
 
