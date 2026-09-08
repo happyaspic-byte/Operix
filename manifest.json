@@ -1,0 +1,11 @@
+{
+  "archive": "operix-image.tar.gz",
+  "image": "operix:github-547d995c7f63f90e8d96974275af1d2fb22b3897",
+  "image_id": "sha256:e456bc2cea5b827574b1c12754c965b1fedea405e419ed119a3b33d4ecca4229",
+  "repository": "happyaspic-byte/Operix",
+  "revision": "547d995c7f63f90e8d96974275af1d2fb22b3897",
+  "run_id": "34238953778",
+  "schema": 1,
+  "sha256": "02d957ecf9f96f609cb2d28db09be77f15e96d97657c245308c9ade5305baf4b",
+  "size": 335890714
+}
