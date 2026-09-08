@@ -544,6 +544,33 @@ small {
 .button:hover {
   background: #f4f7f4;
 }
+.button.danger {
+  color: #9f5348;
+  border-color: #e9d3ce;
+}
+.trash-toggle[aria-pressed="true"] {
+  color: var(--green-dark);
+  background: #edf4ef;
+  border-color: #b3cbbd;
+}
+.trash-notice {
+  display: grid;
+  gap: 5px;
+  padding: 15px 18px;
+  margin-bottom: 20px;
+  border: 1px solid #dfd8bf;
+  border-radius: 8px;
+  background: #faf8f0;
+  color: #625b3b;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.trash-list-notice {
+  padding: 0 23px 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
 .button.primary {
   background: var(--green);
   border-color: var(--green);

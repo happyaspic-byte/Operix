@@ -9,7 +9,7 @@ export async function overview(user: User) {
   const [counts, assets, contracts, inspections, tickets, activity] =
     await Promise.all([
       db.query(
-        `SELECT (SELECT count(*)::int FROM customers WHERE status='active') customers,(SELECT count(*)::int FROM assets WHERE status<>'archived') assets,(SELECT count(*)::int FROM tickets WHERE status NOT IN ('resolved','closed')) tickets,(SELECT count(*)::int FROM inspections WHERE status IN ('scheduled','in_progress') AND planned_date<$1) overdue`,
+        `SELECT (SELECT count(*)::int FROM customers WHERE status='active') customers,(SELECT count(*)::int FROM assets WHERE status<>'archived') assets,(SELECT count(*)::int FROM tickets WHERE status NOT IN ('resolved','closed')) tickets,(SELECT count(*)::int FROM inspections WHERE deleted_at IS NULL AND status IN ('scheduled','in_progress') AND planned_date<$1) overdue`,
         [today],
       ),
       db.query(
@@ -20,7 +20,7 @@ export async function overview(user: User) {
         [addDays(today, 90)],
       ),
       db.query(
-        `${selection("inspections")} WHERE e.status IN ('scheduled','in_progress') ORDER BY e.planned_date,e.id LIMIT 5`,
+        `${selection("inspections")} WHERE e.deleted_at IS NULL AND e.status IN ('scheduled','in_progress') ORDER BY e.planned_date,e.id LIMIT 5`,
       ),
       db.query(
         "SELECT t.*,c.name customer_name,u.name assignee_name FROM tickets t JOIN customers c ON c.id=t.customer_id LEFT JOIN users u ON u.id=t.assignee_id WHERE t.status NOT IN ('resolved','closed') ORDER BY CASE t.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END,t.updated_at DESC LIMIT 4",

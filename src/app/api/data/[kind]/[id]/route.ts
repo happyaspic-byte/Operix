@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { assertOrigin, requireUser } from "@/lib/auth";
-import { getRecord, saveRecord } from "@/lib/records";
+import { getRecord, saveRecord, setInspectionDeleted } from "@/lib/records";
+import { AppError } from "@/lib/policy";
 import { securityLog } from "@/lib/security";
 import { failure, readJson } from "@/lib/http";
 export async function GET(
@@ -31,6 +32,23 @@ export async function PATCH(
       p = await params;
     return NextResponse.json(
       await saveRecord(p.kind, user, await readJson(request), p.id),
+    );
+  } catch (e) {
+    return failure(e);
+  }
+}
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ kind: string; id: string }> },
+) {
+  try {
+    assertOrigin(request);
+    const user = await requireUser(),
+      p = await params;
+    if (p.kind !== "inspections")
+      throw new AppError(405, "이 자료의 삭제는 지원하지 않습니다.");
+    return NextResponse.json(
+      await setInspectionDeleted(user, p.id, await readJson(request), true),
     );
   } catch (e) {
     return failure(e);

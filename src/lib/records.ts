@@ -3,7 +3,8 @@ import { catalog } from "./catalog";
 import { audit, type User } from "./auth";
 import { AppError, can, redact, requirePermission } from "./policy";
 import { validateEntity } from "./validation";
-import { pagination, queryDate } from "./http";
+import { pagination, queryDate, parseInput } from "./http";
+import { z } from "zod";
 import { workflowFields } from "./workflow";
 import { lockBusiness } from "./transactions";
 const customerJoin =
@@ -60,6 +61,13 @@ export async function listRecords(
     );
   }
   if (kind === "inspections") {
+    const trash = query.get("trash");
+    if (trash && !["0", "1"].includes(trash))
+      throw new AppError(400, "휴지통 보기 값을 확인해 주세요.");
+    if (trash === "1") requirePermission(user.role, "work:delete");
+    where.push(
+      trash === "1" ? "e.deleted_at IS NOT NULL" : "e.deleted_at IS NULL",
+    );
     if (query.get("asset_id")) {
       params.push(query.get("asset_id"));
       where.push(
@@ -159,6 +167,7 @@ export async function getRecord(
   id: string,
   user: User,
   db?: Database,
+  includeDeleted = false,
 ) {
   if (!Object.hasOwn(catalog, kind))
     throw new AppError(404, "자료 유형을 찾을 수 없습니다.");
@@ -167,7 +176,84 @@ export async function getRecord(
     [id],
   );
   if (!record) throw new AppError(404, "자료를 찾을 수 없습니다.");
+  if (kind === "inspections" && record.deleted_at) {
+    if (!includeDeleted)
+      throw new AppError(
+        410,
+        "휴지통에 있는 점검입니다. 복원한 뒤 이용해 주세요.",
+      );
+    requirePermission(user.role, "work:delete");
+  }
   return redact(record, user.role);
+}
+export async function setInspectionDeleted(
+  user: User,
+  id: string,
+  input: unknown,
+  deleted: boolean,
+) {
+  requirePermission(user.role, "work:delete");
+  const { version } = parseInput(
+    z.object({ version: z.number().int().positive() }).strict(),
+    input,
+  );
+  parseInput(z.string().uuid(), id);
+  const db = await getDb();
+  return db.transaction(async (tx) => {
+    await lockBusiness(tx);
+    const [actor] = await tx.query(
+      "SELECT role,active,deleted_at,privacy_erased_at FROM users WHERE id=$1",
+      [user.id],
+    );
+    if (
+      !actor ||
+      !actor.active ||
+      actor.deleted_at ||
+      actor.privacy_erased_at ||
+      !can(actor.role, "work:delete")
+    )
+      throw new AppError(
+        403,
+        "점검 삭제·복원 권한이 없습니다. 다시 로그인해 주세요.",
+      );
+    const [record] = await tx.query(
+      "SELECT * FROM inspections WHERE id=$1 FOR UPDATE",
+      [id],
+    );
+    if (!record) throw new AppError(404, "점검을 찾을 수 없습니다.");
+    if (record.version !== version)
+      throw new AppError(
+        409,
+        "점검이 변경되었습니다. 새로고침 후 다시 확인해 주세요.",
+      );
+    if (record.privacy_erased_at)
+      throw new AppError(410, "파기된 점검은 삭제·복원할 수 없습니다.");
+    if (!!record.deleted_at === deleted)
+      throw new AppError(
+        409,
+        deleted
+          ? "이미 휴지통에 있는 점검입니다."
+          : "휴지통에 없는 점검입니다.",
+      );
+    await tx.query(
+      "UPDATE inspections SET deleted_at=CASE WHEN $2 THEN now() ELSE NULL END,deleted_by=CASE WHEN $2 THEN $3 ELSE NULL END,version=version+1,updated_at=now() WHERE id=$1",
+      [id, deleted, user.id],
+    );
+    if (deleted)
+      await tx.query(
+        "DELETE FROM notifications WHERE source_kind='inspections' AND source_id=$1",
+        [id],
+      );
+    await audit(
+      tx,
+      user.id,
+      deleted ? "delete" : "restore",
+      "inspections",
+      id,
+      { version_before: version, version_after: version + 1 },
+    );
+    return getRecord("inspections", id, user, tx, true);
+  });
 }
 async function validateRelations(
   tx: Database,
@@ -269,6 +355,11 @@ export async function saveRecord(
         [id],
       );
       if (!previous) throw new AppError(404, "자료를 찾을 수 없습니다.");
+      if (kind === "inspections" && previous.deleted_at)
+        throw new AppError(
+          410,
+          "휴지통에 있는 점검은 수정할 수 없습니다. 먼저 복원해 주세요.",
+        );
       if (previous.version !== version)
         throw new AppError(
           409,

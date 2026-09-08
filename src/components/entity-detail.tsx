@@ -12,6 +12,8 @@ import {
   Send,
   History,
   ExternalLink,
+  Trash2,
+  RotateCcw,
 } from "lucide-react";
 import { catalog } from "@/lib/catalog";
 import { can } from "@/lib/policy";
@@ -47,15 +49,21 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
     [evidence, setEvidence] = useState("observed"),
     [busy, setBusy] = useState(false);
   useEffect(() => {
+    const controller = new AbortController();
     api(
       `/api/details/${kind}/${id}?` +
         new URLSearchParams({ section: tab, page: String(page), q: search }),
+      { signal: controller.signal },
     )
       .then((d) => {
+        if (controller.signal.aborted) return;
         setData(d);
         setError("");
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => {
+        if (!controller.signal.aborted) setError(e.message);
+      });
+    return () => controller.abort();
   }, [kind, id, revision, tab, page, search]);
   useEffect(() => {
     setPage(1);
@@ -76,8 +84,11 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
   }
   if (!data) return error ? <ErrorNotice message={error} /> : <Loading />;
   const record = data.record,
-    work = ["inspections", "tickets"].includes(kind);
+    work = ["inspections", "tickets"].includes(kind),
+    deleted = kind === "inspections" && Boolean(record.deleted_at),
+    canDelete = kind === "inspections" && can(user.role, "work:delete");
   const writable =
+    !deleted &&
     can(user.role, config.permission) &&
     !(
       user.role === "engineer" &&
@@ -85,6 +96,33 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
       record.assignee_id &&
       record.assignee_id !== user.id
     );
+  async function changeDeletion() {
+    if (
+      !deleted &&
+      !window.confirm(
+        `‘${record.name}’ 점검을 삭제해 휴지통으로 이동할까요? 기존 작업 이력과 첨부 자료는 보존되며 휴지통에서 복원할 수 있습니다.`,
+      )
+    )
+      return;
+    setError("");
+    setBusy(true);
+    try {
+      const saved = await api(
+        `/api/data/inspections/${id}${deleted ? "/restore" : ""}`,
+        {
+          method: deleted ? "POST" : "DELETE",
+          body: JSON.stringify({ version: record.version }),
+        },
+      );
+      setData((current: any) => ({ ...current, record: saved }));
+      setMessage(deleted ? "점검을 복원했습니다." : "");
+      setRevision((n) => n + 1);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   const relationshipTabs = Object.keys(data.related);
   function renderValue(f: any) {
     const v = record[f.key];
@@ -147,7 +185,10 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
   }
   return (
     <>
-      <Link className="back-link" href={"/" + kind}>
+      <Link
+        className="back-link"
+        href={"/" + kind + (deleted ? "?trash=1" : "")}
+      >
         <ArrowLeft size={15} />
         {config.title}
       </Link>
@@ -171,6 +212,16 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
           {kind === "contracts" && (
             <Expiry end={record.end_date} term={record.term} />
           )}{" "}
+          {canDelete && (
+            <button
+              className={"button " + (deleted ? "" : "danger")}
+              disabled={busy}
+              onClick={changeDeletion}
+            >
+              {deleted ? <RotateCcw size={16} /> : <Trash2 size={16} />}
+              {deleted ? "점검 복원" : "점검 삭제"}
+            </button>
+          )}
           {writable && (
             <button
               className="button"
@@ -204,7 +255,7 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
                 후속 작업 열기
               </button>
             )}
-          {work && can(user.role, "reports:approve") && (
+          {work && !deleted && can(user.role, "reports:approve") && (
             <>
               <select
                 aria-label="보고서 용도"
@@ -242,6 +293,15 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
           )}
         </div>
       </div>
+      {deleted && (
+        <div className="trash-notice" role="status">
+          <strong>휴지통에 있는 점검입니다.</strong>
+          <span>
+            기존 이력과 첨부 자료는 보존됩니다. 복원하기 전까지 내용을 변경할 수
+            없습니다.
+          </span>
+        </div>
+      )}
       <ErrorNotice message={error} />
       {message && <p role="status">{message}</p>}
       <div className="tabs">
@@ -356,7 +416,7 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
         <section className="panel">
           <div className="panel-heading">
             <h2>{catalog[tab].title}</h2>
-            {can(user.role, catalog[tab].permission) && (
+            {!deleted && can(user.role, catalog[tab].permission) && (
               <button
                 className="button small"
                 onClick={() =>
@@ -555,7 +615,11 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
           {!data.reports.length && !data.documents.length && (
             <Empty
               title="첨부된 자료가 없습니다."
-              description="사진과 문서를 첨부하거나, 완료 후 보고서를 확정하세요."
+              description={
+                deleted
+                  ? "휴지통에 있는 점검에는 새 자료를 첨부할 수 없습니다."
+                  : "사진과 문서를 첨부하거나, 완료 후 보고서를 확정하세요."
+              }
             />
           )}
         </section>
@@ -595,7 +659,7 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
           onPage={setPage}
         />
       )}
-      {editor && (
+      {editor && !deleted && (
         <RecordEditor
           kind={editor.kind}
           initial={editor.initial}

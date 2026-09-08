@@ -11,6 +11,7 @@ export type Permission =
   | "assets:write"
   | "contracts:write"
   | "work:write"
+  | "work:delete"
   | "reports:approve"
   | "users:write"
   | "export"
@@ -23,6 +24,7 @@ const grants: Record<Role, Permission[]> = {
     "assets:write",
     "contracts:write",
     "work:write",
+    "work:delete",
     "reports:approve",
     "users:write",
     "export",
@@ -35,6 +37,7 @@ const grants: Record<Role, Permission[]> = {
     "assets:write",
     "contracts:write",
     "work:write",
+    "work:delete",
     "reports:approve",
     "export",
     "network",

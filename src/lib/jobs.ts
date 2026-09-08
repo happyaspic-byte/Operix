@@ -106,7 +106,7 @@ export async function runJobs(today = todayKST()) {
         }
       }
       const inspections = await tx.query(
-        "SELECT * FROM inspections WHERE status IN ('scheduled','in_progress') AND planned_date<=$1",
+        "SELECT * FROM inspections WHERE deleted_at IS NULL AND status IN ('scheduled','in_progress') AND planned_date<=$1",
         [addDays(today, 7)],
       );
       for (const i of inspections) {
@@ -167,7 +167,7 @@ export async function runJobs(today = todayKST()) {
         "DELETE FROM notifications n WHERE source_kind='tickets' AND EXISTS(SELECT 1 FROM tickets t WHERE t.id=n.source_id AND t.status IN ('resolved','closed'))",
       );
       await tx.query(
-        "DELETE FROM notifications n WHERE n.source_kind='inspections' AND EXISTS(SELECT 1 FROM inspections i WHERE i.id=n.source_id AND i.status IN ('completed','cancelled'))",
+        "DELETE FROM notifications n WHERE n.source_kind='inspections' AND EXISTS(SELECT 1 FROM inspections i WHERE i.id=n.source_id AND (i.deleted_at IS NOT NULL OR i.status IN ('completed','cancelled')))",
       );
       await tx.query(
         "DELETE FROM notifications n WHERE n.source_kind='contracts' AND EXISTS(SELECT 1 FROM contracts c WHERE c.id=n.source_id AND (c.status='archived' OR c.renewal IN ('renewed','ended')))",

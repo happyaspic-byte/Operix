@@ -11,7 +11,7 @@ export async function details(
   query = new URLSearchParams(),
 ) {
   const db = await getDb(),
-    record = await getRecord(kind, id, user),
+    record = await getRecord(kind, id, user, db, true),
     related: Record<string, any[]> = {};
   const page = pagination(query),
     totals: Record<string, number> = {},
@@ -22,11 +22,13 @@ export async function details(
     values: unknown[],
     column = "name",
   ) {
-    const filter =
-      section === key && query.get("q")
-        ? ` WHERE ${column} ILIKE $${values.length + 1}`
-        : "";
-    const ps = filter
+    const searching = section === key && query.get("q");
+    const clauses = [
+      ...(key === "inspections" ? ["deleted_at IS NULL"] : []),
+      ...(searching ? [`${column} ILIKE $${values.length + 1}`] : []),
+    ];
+    const filter = clauses.length ? " WHERE " + clauses.join(" AND ") : "";
+    const ps = searching
       ? [...values, "%" + query.get("q")!.slice(0, 150) + "%"]
       : values;
     const base = `SELECT * FROM (${sql}) related${filter}`;

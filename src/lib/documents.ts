@@ -101,7 +101,7 @@ export async function listDocuments(user: User, q: URLSearchParams) {
       params,
     );
   const rows = await db.query(
-    `SELECT d.id,d.entity_kind,d.entity_id,d.name,d.mime_type,d.size_bytes,d.created_at,d.classification,d.scan_status,d.version FROM documents d WHERE ${filter} ORDER BY d.created_at DESC,d.id LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    `SELECT d.id,d.entity_kind,d.entity_id,d.name,d.mime_type,d.size_bytes,d.created_at,d.classification,d.scan_status,d.version,i.deleted_at entity_deleted_at FROM documents d LEFT JOIN inspections i ON d.entity_kind='inspections' AND i.id=d.entity_id WHERE ${filter} ORDER BY d.created_at DESC,d.id LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
     [...params, p.limit, p.offset],
   );
   return { rows, total: count.total, page: p.page, limit: p.limit };
@@ -211,6 +211,7 @@ export async function createDownloadGrant(
     ]);
   if (!doc) throw new AppError(404, "첨부 자료를 찾을 수 없습니다.");
   requireDocumentAccess(user.role, doc);
+  await getRecord(doc.entity_kind, doc.entity_id, user, db, true);
   const token = randomBytes(32).toString("hex"),
     key = createHash("sha256").update(token).digest("hex");
   await db.query(
@@ -241,7 +242,7 @@ export async function downloadDocument(
     ]);
   if (!doc) throw new AppError(404, "첨부 자료를 찾을 수 없습니다.");
   requireDocumentAccess(user.role, doc);
-  await getRecord(doc.entity_kind, doc.entity_id, user);
+  await getRecord(doc.entity_kind, doc.entity_id, user, db, true);
   let reason = "사내 공유 자료 확인";
   if (doc.classification !== "internal") {
     const token = q.get("grant") || "",
@@ -284,6 +285,43 @@ export async function downloadDocument(
     ) as ReadableStream<Uint8Array>,
   };
 }
+
+export async function classifyDocument(
+  user: User,
+  id: string,
+  input: { classification: string; version: number; rescan?: boolean },
+) {
+  requirePermission(user.role, "reports:approve");
+  const classification = validateClassification(
+    user.role,
+    input.classification,
+  );
+  if (!Number.isInteger(input.version) || input.version < 1)
+    throw new AppError(400, "첨부 자료의 수정 버전을 확인해 주세요.");
+  const db = await getDb();
+  await db.transaction(async (tx) => {
+    await lockBusiness(tx);
+    const [document] = await tx.query(
+      "SELECT entity_kind,entity_id,version FROM documents WHERE id=$1 AND deleted_at IS NULL FOR UPDATE",
+      [id],
+    );
+    if (!document || document.version !== input.version)
+      throw new AppError(
+        409,
+        "자료가 변경되었습니다. 새로고침 후 다시 시도해 주세요.",
+      );
+    // Checking under the deletion lock keeps existing evidence read-only in trash.
+    await getRecord(document.entity_kind, document.entity_id, user, tx);
+    await tx.query(
+      "UPDATE documents SET classification=$2,version=version+1,scan_status=CASE WHEN $4 THEN 'pending' ELSE scan_status END WHERE id=$1 AND version=$3 AND deleted_at IS NULL",
+      [id, classification, input.version, input.rescan ?? false],
+    );
+    await tx.query("DELETE FROM download_grants WHERE document_id=$1", [id]);
+    await audit(tx, user.id, "classify", "documents", id, { classification });
+  });
+  return { ok: true };
+}
+
 export async function scanPendingDocuments() {
   const db = await getDb(),
     docs = await db.query(

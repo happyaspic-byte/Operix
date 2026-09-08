@@ -85,5 +85,6 @@ FILE_SCAN_MODE=test E2E_START_SERVER=1 npm run test:e2e
 - [다른 ERP와의 비교](docs/COMPARISON.md)
 - [설치와 운영](docs/DEPLOYMENT.md)
 - [점검 대상 자산 여러 개 선택](docs/INSPECTION-ASSETS.md)
+- [점검·계정 삭제와 부서·직책 관리](docs/RECORD-DELETION.md)
 
 현재 버전은 고객·자산·유지보수 범위입니다. 영업·구매·재고·재무·인사는 후속 확장 대상입니다. 실제 사내 자료 이관, 운영망·인증서 구성과 현장 복구 시험은 해당 환경에서 진행해야 합니다.

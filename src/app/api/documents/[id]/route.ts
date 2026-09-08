@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { assertOrigin, requireUser, audit, type User } from "@/lib/auth";
+import { assertOrigin, requireUser, type User } from "@/lib/auth";
 import { failure, readJson, parseInput } from "@/lib/http";
-import { downloadDocument, createDownloadGrant } from "@/lib/documents";
-import { validateClassification } from "@/lib/document-policy";
+import {
+  downloadDocument,
+  createDownloadGrant,
+  classifyDocument,
+} from "@/lib/documents";
 import { securityLog } from "@/lib/security";
 import { AppError, requirePermission } from "@/lib/policy";
-import { getDb } from "@/lib/db";
-import { lockBusiness } from "@/lib/transactions";
 type Context = { params: Promise<{ id: string }> };
 async function denied(
   u: User | undefined,
@@ -85,28 +86,13 @@ export async function PATCH(request: Request, { params }: Context) {
           .strict(),
         await readJson(request),
       );
-    const classification = validateClassification(u.role, b.classification),
-      db = await getDb();
-    await db.transaction(async (tx) => {
-      await lockBusiness(tx);
-      const rows = await tx.query(
-        "UPDATE documents SET classification=$2,version=version+1,scan_status=CASE WHEN $4 THEN 'pending' ELSE scan_status END WHERE id=$1 AND version=$3 AND deleted_at IS NULL RETURNING id",
-        [id, classification, b.version, b.rescan],
-      );
-      if (!rows.length)
-        throw new AppError(
-          409,
-          "자료가 변경되었습니다. 새로고침 후 다시 시도해 주세요.",
-        );
-      await tx.query("DELETE FROM download_grants WHERE document_id=$1", [id]);
-      await audit(tx, u.id, "classify", "documents", id, { classification });
-    });
+    const result = await classifyDocument(u, id, b);
     await securityLog(
       u,
       { action: "classify", kind: "documents", ids: [id] },
       request,
     );
-    return NextResponse.json({ ok: true });
+    return NextResponse.json(result);
   } catch (e) {
     return failure(e);
   }

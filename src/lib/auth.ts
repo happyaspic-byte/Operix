@@ -9,12 +9,15 @@ import { cookies, headers } from "next/headers";
 import { getDb, type Database } from "./db";
 import { connectionInfo } from "./security";
 import { AppError, type Role } from "./policy";
+import { lockBusiness } from "./transactions";
 export type User = {
   id: string;
   email: string;
   name: string;
   role: Role;
   active: boolean;
+  department?: string;
+  job_title?: string;
   must_change_password?: boolean;
   session_id?: string;
   session_expires_at?: string;
@@ -54,16 +57,24 @@ export async function createSession(userId: string, request?: Request) {
   const token = randomBytes(32).toString("hex");
   const db = await getDb(),
     context = await connectionInfo(request);
-  await db.query(
-    "INSERT INTO sessions(id,user_id,expires_at,client_address,user_agent) VALUES ($1,$2,$3,$4,$5)",
-    [
-      digest(token),
-      userId,
-      new Date(Date.now() + TTL * 1000),
-      context.address,
-      context.agent,
-    ],
-  );
+  await db.transaction(async (tx) => {
+    await lockBusiness(tx);
+    const [user] = await tx.query(
+      "SELECT id FROM users WHERE id=$1 AND active=true AND deleted_at IS NULL AND privacy_erased_at IS NULL FOR UPDATE",
+      [userId],
+    );
+    if (!user) throw new AppError(401, "로그인이 필요합니다.");
+    await tx.query(
+      "INSERT INTO sessions(id,user_id,expires_at,client_address,user_agent) VALUES ($1,$2,$3,$4,$5)",
+      [
+        digest(token),
+        userId,
+        new Date(Date.now() + TTL * 1000),
+        context.address,
+        context.agent,
+      ],
+    );
+  });
   return sealData({ token }, { password: secret(), ttl: TTL });
 }
 export async function resolveSession(
@@ -80,7 +91,7 @@ export async function resolveSession(
     const [user] = await (
       await getDb()
     ).query(
-      "UPDATE sessions s SET last_seen_at=CASE WHEN $3 THEN now() ELSE s.last_seen_at END FROM users u WHERE u.id=s.user_id AND s.id=$1 AND s.expires_at>now() AND u.active=true AND s.last_seen_at>now()-($2::int*interval '1 minute') RETURNING u.id,u.email,u.name,u.role,u.active,u.must_change_password,s.id session_id,s.expires_at session_expires_at",
+      "UPDATE sessions s SET last_seen_at=CASE WHEN $3 THEN now() ELSE s.last_seen_at END FROM users u WHERE u.id=s.user_id AND s.id=$1 AND s.expires_at>now() AND u.active=true AND u.deleted_at IS NULL AND u.privacy_erased_at IS NULL AND s.last_seen_at>now()-($2::int*interval '1 minute') RETURNING u.id,u.email,u.name,u.role,u.active,u.department,u.job_title,u.must_change_password,s.id session_id,s.expires_at session_expires_at",
       [
         digest(data.token),
         Math.max(
@@ -178,7 +189,7 @@ export async function attemptLogin(
   ]);
   const dummy = "scrypt:00000000000000000000000000000000:" + "0".repeat(128);
   const ok = await verifyPassword(password, user?.password_hash || dummy);
-  if (!user || !user.active || !ok)
+  if (!user || !user.active || user.deleted_at || user.privacy_erased_at || !ok)
     throw new AppError(401, "이메일 또는 비밀번호가 올바르지 않습니다.");
   await db.query("DELETE FROM login_attempts WHERE id=$1", [limits[2][0]]);
   return user as User;

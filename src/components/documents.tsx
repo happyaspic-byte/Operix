@@ -149,33 +149,38 @@ export function Documents() {
                 >
                   관련 기록
                 </Link>
-                {tab === "documents" && can(user.role, "reports:approve") && (
-                  <select
-                    aria-label={`${d.name} 분류 변경`}
-                    value={d.classification}
-                    onChange={async (e) => {
-                      try {
-                        await api("/api/documents/" + d.id, {
-                          method: "PATCH",
-                          body: JSON.stringify({
-                            classification: e.target.value,
-                            version: d.version,
-                            rescan: d.scan_status === "error",
-                          }),
-                        });
-                        refresh((n) => n + 1);
-                      } catch (e) {
-                        setError((e as Error).message);
-                      }
-                    }}
-                  >
-                    {Object.entries(classificationNames).map(([v, l]) => (
-                      <option key={v} value={v}>
-                        {l}
-                      </option>
-                    ))}
-                  </select>
+                {tab === "documents" && d.entity_deleted_at && (
+                  <span className="muted">휴지통 점검 · 읽기 전용</span>
                 )}
+                {tab === "documents" &&
+                  !d.entity_deleted_at &&
+                  can(user.role, "reports:approve") && (
+                    <select
+                      aria-label={`${d.name} 분류 변경`}
+                      value={d.classification}
+                      onChange={async (e) => {
+                        try {
+                          await api("/api/documents/" + d.id, {
+                            method: "PATCH",
+                            body: JSON.stringify({
+                              classification: e.target.value,
+                              version: d.version,
+                              rescan: d.scan_status === "error",
+                            }),
+                          });
+                          refresh((n) => n + 1);
+                        } catch (e) {
+                          setError((e as Error).message);
+                        }
+                      }}
+                    >
+                      {Object.entries(classificationNames).map(([v, l]) => (
+                        <option key={v} value={v}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  )}
               </div>
             ))}
           </div>

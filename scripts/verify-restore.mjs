@@ -38,6 +38,15 @@ if (
   JSON.stringify(originalTargets.rows) !== JSON.stringify(restoredTargets.rows)
 )
   throw new Error("Inspection target links differ");
+for (const sql of [
+  "SELECT id,department,job_title,active,deleted_at,deleted_by FROM users ORDER BY id",
+  "SELECT id,deleted_at,deleted_by FROM inspections ORDER BY id",
+]) {
+  const before = await original.query(sql);
+  const after = await restored.query(sql);
+  if (JSON.stringify(before.rows) !== JSON.stringify(after.rows))
+    throw new Error("Account profile or recycle-bin state differs");
+}
 await original.end();
 await restored.end();
 console.log("Database restore verification passed.");

@@ -9,10 +9,11 @@ import {
   ChevronLeft,
   ChevronRight,
   SlidersHorizontal,
+  Trash2,
 } from "lucide-react";
 import { catalog } from "@/lib/catalog";
 import { can } from "@/lib/policy";
-import { api, useUser, ErrorNotice, Loading } from "./ui";
+import { api, useUser, ErrorNotice, Loading, Empty } from "./ui";
 import { RecordEditor } from "./record-editor";
 import { RecordTable } from "./record-table";
 import { ImportDialog } from "./import-dialog";
@@ -26,6 +27,7 @@ export function EntityList({ entity }: { entity: string }) {
     [expiry, setExpiry] = useState(""),
     [query, setQuery] = useState(""),
     [status, setStatus] = useState(""),
+    [trash, setTrash] = useState(false),
     [sort, setSort] = useState("created_at"),
     [page, setPage] = useState(1),
     [data, setData] = useState<any>(null),
@@ -37,6 +39,8 @@ export function EntityList({ entity }: { entity: string }) {
     [columns, setColumns] = useState<string[]>([]),
     [presets, setPresets] = useState<any[]>([]);
   const config = catalog[kind];
+  const canViewTrash = kind === "inspections" && can(user.role, "work:delete");
+  const showTrash = canViewTrash && trash;
   useEffect(() => {
     function restore() {
       const p = new URLSearchParams(location.search);
@@ -46,13 +50,14 @@ export function EntityList({ entity }: { entity: string }) {
       );
       setQuery(p.get("q") || "");
       setStatus(p.get("status") || "");
+      setTrash(p.get("trash") === "1");
       setSort(p.get("sort") || "created_at");
       setPage(Math.max(1, Number(p.get("page")) || 1));
       setMine(p.get("mine") === "1");
       setFrom(p.get("from") || "");
       setTo(p.get("to") || "");
       setExpiry(p.get("expiry") || "");
-      if (p.get("new") === "1") setEditor(true);
+      if (p.get("new") === "1" && p.get("trash") !== "1") setEditor(true);
       setReady(true);
     }
     restore();
@@ -64,6 +69,7 @@ export function EntityList({ entity }: { entity: string }) {
     q: query,
     page: String(page),
     status,
+    ...(kind === "inspections" ? { trash: showTrash ? "1" : "" } : {}),
     sort,
     direction: sort === "name" ? "asc" : "desc",
     mine: mine ? "1" : "",
@@ -84,7 +90,20 @@ export function EntityList({ entity }: { entity: string }) {
         "",
         "/" + entity + "?" + filters.toString(),
       );
-  }, [ready, entity, kind, query, page, status, sort, mine, from, to, expiry]);
+  }, [
+    ready,
+    entity,
+    kind,
+    query,
+    page,
+    status,
+    sort,
+    mine,
+    from,
+    to,
+    expiry,
+    showTrash,
+  ]);
   useEffect(() => {
     if (!ready) return;
     const c = new AbortController();
@@ -126,6 +145,7 @@ export function EntityList({ entity }: { entity: string }) {
     from,
     to,
     expiry,
+    showTrash,
   ]);
   useEffect(() => {
     try {
@@ -159,6 +179,20 @@ export function EntityList({ entity }: { entity: string }) {
     setTo("");
     setExpiry("");
     setPage(1);
+  }
+  function toggleTrash() {
+    const next = !showTrash;
+    const nextFilters = new URLSearchParams(filters);
+    nextFilters.set("trash", next ? "1" : "");
+    nextFilters.set("page", "1");
+    window.history.pushState(
+      null,
+      "",
+      "/" + entity + "?" + nextFilters.toString(),
+    );
+    setTrash(next);
+    setPage(1);
+    setData(null);
   }
   const filtered = Boolean(query || status || mine || from || to || expiry);
   const statusField = config.fields.find((f) => f.key === "status");
@@ -197,7 +231,7 @@ export function EntityList({ entity }: { entity: string }) {
                 가져오기
               </button>
             )}
-          {can(user.role, config.permission) && (
+          {!showTrash && can(user.role, config.permission) && (
             <button className="button primary" onClick={() => setEditor(true)}>
               <Plus size={17} />
               {config.singular} 등록
@@ -216,6 +250,7 @@ export function EntityList({ entity }: { entity: string }) {
                 setKind(t);
                 setPage(1);
                 setStatus("");
+                setTrash(false);
                 setData(null);
               }}
             >
@@ -239,6 +274,16 @@ export function EntityList({ entity }: { entity: string }) {
             />
           </div>
           <div className="toolbar-filters">
+            {canViewTrash && (
+              <button
+                className="button trash-toggle"
+                aria-pressed={showTrash}
+                onClick={toggleTrash}
+              >
+                <Trash2 size={15} />
+                휴지통
+              </button>
+            )}
             {statusField && (
               <select
                 aria-label="상태 필터"
@@ -427,9 +472,19 @@ export function EntityList({ entity }: { entity: string }) {
           )}
           <small>보기 설정은 이 브라우저에 저장됩니다.</small>
         </div>
+        {showTrash && (
+          <p className="trash-list-notice" role="status">
+            삭제한 점검만 표시합니다. 점검 상세에서 복원할 수 있습니다.
+          </p>
+        )}
         <ErrorNotice message={error} />
         {loading ? (
           <Loading />
+        ) : data && showTrash && !filtered && !data.rows.length ? (
+          <Empty
+            title="휴지통이 비어 있습니다."
+            description="삭제한 점검은 이곳에서 확인하고 복원할 수 있습니다."
+          />
         ) : data ? (
           <RecordTable
             kind={kind}

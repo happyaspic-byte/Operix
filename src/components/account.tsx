@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ErrorNotice, Loading } from "./ui";
+import { roleNames, type Role } from "@/lib/policy";
 export function Account() {
   const router = useRouter(),
     [data, setData] = useState<any>(null),
@@ -30,6 +31,28 @@ export function Account() {
           초기 비밀번호를 변경한 뒤 업무를 시작해 주세요.
         </p>
       )}
+      <section className="panel settings-section">
+        <div className="panel-heading">
+          <h2>내 정보</h2>
+        </div>
+        <dl className="detail-grid">
+          {[
+            ["이름", data.user.name],
+            ["이메일", data.user.email],
+            ["부서", data.user.department || "미등록"],
+            ["직책", data.user.job_title || "미등록"],
+            ["접근 권한", roleNames[data.user.role as Role]],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="footnote">
+          부서·직책은 관리자가 설정에서 관리하며, 접근 권한과 별개입니다.
+        </p>
+      </section>
       <section className="panel settings-section">
         <div className="panel-heading">
           <h2>비밀번호 변경</h2>

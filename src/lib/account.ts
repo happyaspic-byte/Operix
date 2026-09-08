@@ -51,7 +51,11 @@ export async function handoff(user: User, from: string, to: string) {
       ["assets", "owner_id", "status<>'archived'"],
       ["contracts", "owner_id", "status='active'"],
       ["maintenance_plans", "assignee_id", "status='active'"],
-      ["inspections", "assignee_id", "status IN ('scheduled','in_progress')"],
+      [
+        "inspections",
+        "assignee_id",
+        "deleted_at IS NULL AND status IN ('scheduled','in_progress')",
+      ],
       ["tickets", "assignee_id", "status NOT IN ('resolved','closed')"],
     ]) {
       const rows = await tx.query(

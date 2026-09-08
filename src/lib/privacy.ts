@@ -289,7 +289,7 @@ async function applyErasure(
     );
   } else {
     await tx.query(
-      "UPDATE users SET name=$2,email=$3,password_hash=$4,active=false,must_change_password=true,privacy_erased_at=now(),version=version+1,updated_at=now() WHERE id=$1",
+      "UPDATE users SET name=$2,email=$3,password_hash=$4,department='',job_title='',active=false,must_change_password=true,privacy_erased_at=now(),version=version+1,updated_at=now() WHERE id=$1",
       [
         id,
         pseudo,

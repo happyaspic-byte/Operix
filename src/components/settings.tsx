@@ -8,22 +8,85 @@ import {
   ShieldCheck,
   Users,
   Activity,
+  Trash2,
+  RotateCcw,
 } from "lucide-react";
-import { api, ErrorNotice, Loading, Badge } from "./ui";
+import { api, ErrorNotice, Loading, Badge, useUser } from "./ui";
+import { useModalDialog } from "./use-modal-dialog";
 import { OperationsSettings } from "./operations-settings";
 import { PrivacySettings } from "./privacy-settings";
 import { roles, roleNames } from "@/lib/policy";
 export function Settings() {
-  const [data, setData] = useState<any>(null),
+  const user = useUser(),
+    trashToggle = useRef<HTMLButtonElement>(null),
+    focusAfterDeletion = useRef(false),
+    [data, setData] = useState<any>(null),
     [error, setError] = useState(""),
+    [message, setMessage] = useState(""),
+    [trash, setTrash] = useState(false),
+    [loadingUsers, setLoadingUsers] = useState(true),
     [editor, setEditor] = useState<any>(null),
     [refresh, setRefresh] = useState(0),
     [busy, setBusy] = useState(false);
   useEffect(() => {
-    api("/api/settings")
-      .then(setData)
-      .catch((e) => setError(e.message));
-  }, [refresh]);
+    if (!busy && focusAfterDeletion.current) {
+      trashToggle.current?.focus();
+      focusAfterDeletion.current = false;
+    }
+  }, [busy]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoadingUsers(true);
+    api("/api/settings" + (trash ? "?trash=1" : ""), {
+      signal: controller.signal,
+    })
+      .then((next) => {
+        if (!controller.signal.aborted) setData(next);
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) {
+          setError(e.message);
+          setData((current: any) =>
+            current ? { ...current, users: [] } : null,
+          );
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingUsers(false);
+      });
+    return () => controller.abort();
+  }, [refresh, trash]);
+  async function changeDeletion(account: any) {
+    const restoring = Boolean(account.deleted_at);
+    if (
+      !restoring &&
+      !window.confirm(
+        `‘${account.name}’ 계정을 삭제해 휴지통으로 이동할까요? 기존 로그인은 해제되며 업무 이력은 보존됩니다. 휴지통에서 복원할 수 있고, 복원 후에도 정지 상태가 유지됩니다.`,
+      )
+    )
+      return;
+    setError("");
+    setMessage("");
+    setBusy(true);
+    try {
+      await api("/api/settings", {
+        method: restoring ? "PATCH" : "DELETE",
+        body: JSON.stringify({ id: account.id, version: account.version }),
+      });
+      focusAfterDeletion.current = true;
+      setLoadingUsers(true);
+      setRefresh((n) => n + 1);
+      setMessage(
+        restoring
+          ? "계정을 복원했습니다. 로그인하려면 계정을 수정해 활성화해 주세요."
+          : "계정을 휴지통으로 이동했습니다. 기존 업무 이력은 보존됩니다.",
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   if (!data) return error ? <ErrorNotice message={error} /> : <Loading />;
   return (
     <>
@@ -44,47 +107,132 @@ export function Settings() {
         </button>
       </div>
       <ErrorNotice message={error} />
-      <section className="panel">
+      {message && <p role="status">{message}</p>}
+      <section className="panel" aria-labelledby="users-heading">
         <div className="panel-heading">
-          <h2>사용자와 권한</h2>
-          <Users size={18} />
+          <h2 id="users-heading">
+            <Users size={18} /> 사용자와 권한
+          </h2>
+          <button
+            ref={trashToggle}
+            className="button small trash-toggle"
+            aria-pressed={trash}
+            disabled={busy}
+            onClick={() => {
+              setTrash((current) => !current);
+              setLoadingUsers(true);
+              setError("");
+              setMessage("");
+            }}
+          >
+            <Trash2 size={15} />
+            휴지통
+          </button>
         </div>
-        <div className="table-scroll">
+        {trash && (
+          <p className="trash-list-notice">
+            삭제한 계정입니다. 복원 후에도 정지 상태가 유지되며, 계정을 수정해
+            활성화할 수 있습니다.
+          </p>
+        )}
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label="계정 목록 · 가로 스크롤 가능"
+          tabIndex={0}
+          aria-busy={loadingUsers}
+        >
           <table>
             <thead>
               <tr>
                 <th>이름</th>
                 <th>이메일</th>
-                <th>역할</th>
+                <th>부서</th>
+                <th>직책</th>
+                <th>권한 역할</th>
                 <th>상태</th>
                 <th>관리</th>
               </tr>
             </thead>
             <tbody>
-              {data.users.map((u: any) => (
-                <tr key={u.id}>
-                  <td>
-                    <strong>{u.name}</strong>
-                  </td>
-                  <td>{u.email}</td>
-                  <td>{roleNames[u.role as keyof typeof roleNames]}</td>
-                  <td>
-                    <Badge
-                      value={u.active ? "active" : "archived"}
-                      label={u.active ? "활성" : "정지"}
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="icon-button"
-                      aria-label={`${u.name} 수정`}
-                      onClick={() => setEditor(u)}
-                    >
-                      <Pencil size={16} />
-                    </button>
+              {loadingUsers ? (
+                <tr>
+                  <td colSpan={7}>
+                    <Loading />
                   </td>
                 </tr>
-              ))}
+              ) : data.users.length ? (
+                data.users.map((u: any) => (
+                  <tr key={u.id}>
+                    <td>
+                      <strong>{u.name}</strong>
+                    </td>
+                    <td>{u.email}</td>
+                    <td>{u.department || "—"}</td>
+                    <td>{u.job_title || "—"}</td>
+                    <td>{roleNames[u.role as keyof typeof roleNames]}</td>
+                    <td>
+                      <Badge
+                        value={u.active ? "active" : "archived"}
+                        label={
+                          u.privacy_erased_at
+                            ? "파기"
+                            : u.deleted_at
+                              ? "휴지통"
+                              : u.active
+                                ? "활성"
+                                : "정지"
+                        }
+                      />
+                    </td>
+                    <td>
+                      {u.privacy_erased_at ? (
+                        <span className="muted">
+                          개인정보 파기 완료 · 복구 불가
+                        </span>
+                      ) : (
+                        <div className="heading-actions">
+                          {!u.deleted_at && (
+                            <button
+                              className="icon-button"
+                              aria-label={`${u.name} 수정`}
+                              disabled={busy}
+                              onClick={() => setEditor(u)}
+                            >
+                              <Pencil size={16} />
+                            </button>
+                          )}
+                          {u.id !== user.id && (
+                            <button
+                              className={
+                                "button small " + (u.deleted_at ? "" : "danger")
+                              }
+                              aria-label={`${u.name} ${u.deleted_at ? "복원" : "삭제"}`}
+                              disabled={busy}
+                              onClick={() => changeDeletion(u)}
+                            >
+                              {u.deleted_at ? (
+                                <RotateCcw size={14} />
+                              ) : (
+                                <Trash2 size={14} />
+                              )}
+                              {u.deleted_at ? "복원" : "삭제"}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="muted">
+                    {trash
+                      ? "휴지통에 계정이 없습니다."
+                      : "등록된 계정이 없습니다."}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -163,7 +311,10 @@ export function Settings() {
           </table>
         </div>
       </section>
-      <OperationsSettings users={data.users} health={data.health} />
+      <OperationsSettings
+        users={data.assignment_users || []}
+        health={data.health}
+      />
       <PrivacySettings />
       {editor && (
         <UserEditor
@@ -171,6 +322,8 @@ export function Settings() {
           onClose={() => setEditor(null)}
           onSaved={() => {
             setEditor(null);
+            setTrash(false);
+            setLoadingUsers(true);
             setRefresh((n) => n + 1);
           }}
         />
@@ -187,15 +340,26 @@ function UserEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null),
-    [data, setData] = useState({ ...initial, password: "" }),
+  const dialog = useModalDialog(),
+    errorSummary = useRef<HTMLDivElement>(null),
+    [data, setData] = useState({
+      ...initial,
+      department: initial.department || "",
+      job_title: initial.job_title || "",
+      password: "",
+    }),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
+    if (error) errorSummary.current?.focus();
+  }, [error]);
   return (
-    <dialog ref={dialog} className="editor-dialog compact" onCancel={onClose}>
+    <dialog
+      ref={dialog}
+      className="editor-dialog compact"
+      onCancel={onClose}
+      aria-labelledby="user-editor-title"
+    >
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -210,6 +374,8 @@ function UserEditor({
                 email: data.email,
                 name: data.name,
                 role: data.role,
+                department: data.department,
+                job_title: data.job_title,
                 active: data.active,
                 ...(data.password ? { password: data.password } : {}),
               }),
@@ -223,7 +389,9 @@ function UserEditor({
         }}
       >
         <div className="dialog-heading">
-          <h2>{initial.id ? "임직원 계정 수정" : "임직원 계정 발급"}</h2>
+          <h2 id="user-editor-title">
+            {initial.id ? "임직원 계정 수정" : "임직원 계정 발급"}
+          </h2>
           <button
             className="icon-button"
             type="button"
@@ -234,11 +402,15 @@ function UserEditor({
           </button>
         </div>
         <div className="dialog-body">
-          <ErrorNotice message={error} />
+          <div ref={errorSummary} tabIndex={-1}>
+            <ErrorNotice message={error} />
+          </div>
           <div className="form-grid single">
             {[
               ["name", "이름"],
               ["email", "이메일"],
+              ["department", "부서 (선택)"],
+              ["job_title", "직책 (선택)"],
               [
                 "password",
                 initial.id ? "새 비밀번호 (변경 시)" : "초기 비밀번호",
@@ -256,16 +428,28 @@ function UserEditor({
                         : "text"
                   }
                   minLength={key === "password" ? 12 : undefined}
-                  required={key !== "password" || !initial.id}
+                  required={
+                    ["name", "email"].includes(key) ||
+                    (key === "password" && !initial.id)
+                  }
+                  maxLength={
+                    key === "email" ? 254 : key === "password" ? 256 : 100
+                  }
+                  aria-describedby={
+                    ["department", "job_title"].includes(key)
+                      ? "user-organization-help"
+                      : undefined
+                  }
                   value={data[key]}
                   onChange={(e) => setData({ ...data, [key]: e.target.value })}
                 />
               </div>
             ))}
             <div className="form-field">
-              <label htmlFor="user-role">역할</label>
+              <label htmlFor="user-role">권한 역할</label>
               <select
                 id="user-role"
+                aria-describedby="user-organization-help"
                 value={data.role}
                 onChange={(e) => setData({ ...data, role: e.target.value })}
               >
@@ -276,6 +460,9 @@ function UserEditor({
                 ))}
               </select>
             </div>
+            <p className="footnote" id="user-organization-help">
+              부서와 직책은 조직 정보이며, 시스템 접근 권한은 역할로 정합니다.
+            </p>
             <label className="inline-checkbox">
               <input
                 type="checkbox"
