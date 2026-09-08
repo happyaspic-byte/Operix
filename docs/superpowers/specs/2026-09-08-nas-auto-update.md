@@ -1,3 +1,5 @@
+> Historical design: superseded by [Portainer Repository deployment](../../../deploy/nas/README.md).
+
 # NAS automatic deployment
 
 The user authorized GitHub main changes to update the existing Operix NAS deployment automatically. Both existing CI jobs must pass before publication. Preserve Portainer stack 19, endpoint 3, its full environment, databases, attachment/security/scanner volumes, external proxy network, HTTPS service, and unrelated applications.

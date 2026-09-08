@@ -43,7 +43,7 @@ migrate 완료 후 web/worker가 시작된다. 최초 로그인과 관리자 비
 
 ## GitHub 변경 자동 반영
 
-기존 Portainer NAS 스택의 자동 갱신은 [GitHub main → NAS 자동배포](../deploy/nas-auto-update/README.md)를 따른다. `main`의 두 CI 검증 작업이 모두 성공하면 검증한 컨테이너 이미지를 게시하고, NAS 업데이터가 60초 간격으로 새 배포를 확인한다. 기존 운영 Compose·데이터 볼륨을 보존하며 앱 이미지 변수만 갱신한다. PR은 운영에 배포하지 않는다.
+NAS의 자동 갱신은 [Portainer Repository 자동배포](../deploy/nas/README.md)를 따른다. `main`의 두 CI 검증 작업이 모두 성공하면 검증한 이미지를 GHCR에 게시하고, 고정 이미지 digest가 담긴 Compose를 배포 브랜치에 기록한다. Portainer가 1분 간격으로 Git 변경을 확인한다. 기존 운영 데이터·네트워크·HTTPS를 보존하고, migration 전 DB 백업과 앱 health 의존성을 사용한다. 실패 시 이전 이미지 적용은 새 Git revert commit으로 수행한다.
 
 ## 같은 호스트의 별도 검증 환경
 

@@ -175,9 +175,8 @@ jobs:
           docker tag "$tested_image_id" "$deployment_image"
           mkdir -p deploy-artifact
           docker save "$deployment_image" | gzip -n > deploy-artifact/operix-image.tar.gz
-          python3 scripts/create-deploy-manifest.py create deploy-artifact/operix-image.tar.gz \
-            --output deploy-artifact/manifest.json --revision "$GITHUB_SHA" \
-            --image-id "$tested_image_id" --run-id "$GITHUB_RUN_ID"
+          test "$(wc -c < deploy-artifact/operix-image.tar.gz)" -le 2000000000
+          printf '%s\n' "$tested_image_id" > deploy-artifact/image-id.txt
       - name: Retain tested NAS image for the publisher
         if: >-
           github.repository == 'happyaspic-byte/Operix' &&
@@ -187,7 +186,7 @@ jobs:
         with:
           name: operix-nas-image
           path: |
-            deploy-artifact/manifest.json
+            deploy-artifact/image-id.txt
             deploy-artifact/operix-image.tar.gz
           if-no-files-found: error
           compression-level: 0
@@ -205,6 +204,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+      packages: write
       actions: read
     steps:
       - uses: actions/checkout@v4
@@ -214,10 +214,93 @@ jobs:
         with:
           name: operix-nas-image
           path: deploy-artifact
-      - name: Publish immutable release and advance NAS manifest
+      - name: Load and verify the exact tested image
+        id: tested
+        shell: bash
+        run: |
+          set -euo pipefail
+          tested_image_id=$(cat deploy-artifact/image-id.txt)
+          [[ "$tested_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker load --input deploy-artifact/operix-image.tar.gz
+          loaded_image="operix:github-${GITHUB_SHA}"
+          test "$(docker image inspect --format '{{.Id}}' "$loaded_image")" = "$tested_image_id"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$loaded_image")" = linux/amd64
+          printf 'image_id=%s\n' "$tested_image_id" >> "$GITHUB_OUTPUT"
+      - name: Push tested image to GHCR and verify its digest
+        id: registry
         env:
           GH_TOKEN: ${{ github.token }}
+          TESTED_IMAGE_ID: ${{ steps.tested.outputs.image_id }}
+        shell: bash
         run: |
-          python3 scripts/create-deploy-manifest.py publish \
-            deploy-artifact/manifest.json deploy-artifact/operix-image.tar.gz \
-            --revision "$GITHUB_SHA"
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker version --format '{{.Server.APIVersion}}' | python3 -c \
+            'import sys; version=tuple(map(int, sys.stdin.read().strip().split("."))); assert version >= (1, 46), "Docker API 1.46+ is required for a single-platform push"'
+          registry_tag="ghcr.io/happyaspic-byte/operix:sha-${GITHUB_SHA}"
+          docker tag "$TESTED_IMAGE_ID" "$registry_tag"
+          docker push --platform linux/amd64 "$registry_tag" | tee /tmp/operix-registry-push.log
+          registry_digest=$(python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          pattern = r'^sha-' + os.environ['GITHUB_SHA'] + r': digest: (sha256:[0-9a-f]{64}) size: [0-9]+\s*$'
+          matches = re.findall(pattern, Path('/tmp/operix-registry-push.log').read_text(), re.MULTILINE)
+          if len(matches) != 1:
+              raise SystemExit('Expected one pushed Operix registry digest')
+          print('ghcr.io/happyaspic-byte/operix@' + matches[0])
+          PY
+          )
+          docker pull "$registry_digest"
+          test "$(docker image inspect --format '{{.Id}}' "$registry_digest")" = "$TESTED_IMAGE_ID"
+          printf 'image=%s\n' "$registry_digest" >> "$GITHUB_OUTPUT"
+          echo "::notice title=GHCR image uploaded::Package: https://github.com/users/happyaspic-byte/packages/container/package/operix"
+      - name: Wait for public GHCR image
+        env:
+          DEPLOYMENT_IMAGE: ${{ steps.registry.outputs.image }}
+          TESTED_IMAGE_ID: ${{ steps.tested.outputs.image_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_digest="${DEPLOYMENT_IMAGE##*@}"
+          public_deadline=$((SECONDS + 300))
+          for attempt in $(seq 1 30); do
+            if [ "$SECONDS" -ge "$public_deadline" ]; then break; fi
+            anonymous_token=$(curl -q --fail --silent --connect-timeout 3 --max-time 5 \
+              'https://ghcr.io/token?service=ghcr.io&scope=repository:happyaspic-byte/operix:pull' \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null) || anonymous_token=
+            if [ -n "$anonymous_token" ] && curl -q --fail --silent --connect-timeout 3 --max-time 5 \
+              -H "Authorization: Bearer $anonymous_token" \
+              -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/happyaspic-byte/operix/manifests/$manifest_digest" \
+              -o /tmp/operix-public-manifest.json; then
+              python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          manifest = json.loads(Path('/tmp/operix-public-manifest.json').read_text())
+          if manifest.get('schemaVersion') != 2 or manifest.get('config', {}).get('digest') != os.environ['TESTED_IMAGE_ID']:
+              raise SystemExit('Public GHCR manifest does not match the tested image')
+          PY
+              echo 'Anonymous pull of the tested image is available.'
+              exit 0
+            fi
+            if [ "$attempt" = 1 ]; then
+              echo '::notice title=GHCR public visibility required::Set the operix package visibility to Public at https://github.com/users/happyaspic-byte/packages/container/package/operix . Waiting up to five minutes; the deployment branch remains unchanged.'
+            fi
+            remaining_wait=$((public_deadline - SECONDS))
+            if [ "$remaining_wait" -le 0 ]; then break; fi
+            if [ "$remaining_wait" -gt 10 ]; then remaining_wait=10; fi
+            sleep "$remaining_wait"
+          done
+          echo '::error title=GHCR image is not publicly accessible::Set package visibility to Public at https://github.com/users/happyaspic-byte/packages/container/package/operix , then rerun the failed publish job. The deployment branch was not advanced.'
+          exit 1
+      - name: Publish native Portainer Compose
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOYMENT_IMAGE: ${{ steps.registry.outputs.image }}
+        run: |
+          python3 scripts/publish-nas-compose.py --revision "$GITHUB_SHA" \
+            --image "$DEPLOYMENT_IMAGE" --template deploy/nas/compose.template.json \
+            --run-id "$GITHUB_RUN_ID"
+      - name: Remove temporary registry credentials
+        if: always()
+        run: docker logout ghcr.io
