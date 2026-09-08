@@ -66,7 +66,7 @@ export async function readLimited(
       if (part.done) break;
       size += part.value.byteLength;
       if (size > maximum) {
-        await reader.cancel();
+        await reader.cancel().catch(() => {});
         throw new AppError(413, "입력 데이터가 너무 큽니다.");
       }
       chunks.push(part.value);
