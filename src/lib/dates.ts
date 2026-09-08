@@ -17,6 +17,7 @@ export function validDate(value: string): boolean {
   const n = Date.parse(value + "T00:00:00Z");
   return (
     /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    !value.startsWith("0000-") &&
     Number.isFinite(n) &&
     new Date(n).toISOString().slice(0, 10) === value
   );

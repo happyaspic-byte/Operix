@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { AppError } from "./policy";
+import { validDate } from "./dates";
 import { z } from "zod";
 export function failure(error: unknown) {
   const requestId = crypto.randomUUID();
@@ -165,11 +166,7 @@ export async function withUploadSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 export function queryDate(value: string) {
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
-    !Number.isFinite(Date.parse(value)) ||
-    new Date(value).toISOString().slice(0, 10) !== value
-  )
+  if (!validDate(value))
     throw new AppError(400, "유효한 날짜를 입력해 주세요.");
   return value;
 }
