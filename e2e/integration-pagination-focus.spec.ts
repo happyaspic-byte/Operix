@@ -55,7 +55,10 @@ test("Keyboard pagination retains focus while loading and removes stale rows on 
   try {
     await page.goto("/assets");
     await expect(
-      page.getByText("Focus page 1 asset 1", { exact: true }),
+      page.getByRole("link", {
+        name: "Focus page 1 asset 1 Synthetic pagination fixture",
+        exact: true,
+      }),
     ).toBeVisible();
     const next = page.getByRole("button", { name: "다음 페이지", exact: true });
     const previous = page.getByRole("button", {
@@ -81,7 +84,10 @@ test("Keyboard pagination retains focus while loading and removes stale rows on 
 
     secondPage.resolve();
     await expect(
-      page.getByText("Focus page 2 asset 1", { exact: true }),
+      page.getByRole("link", {
+        name: "Focus page 2 asset 1 Synthetic pagination fixture",
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(page.getByRole("status")).toHaveCount(0);
     await expect(next).toBeFocused();
@@ -94,11 +100,16 @@ test("Keyboard pagination retains focus while loading and removes stale rows on 
     await expect(next).toBeFocused();
     await expect(next).toHaveAttribute("aria-disabled", "true");
     thirdPage.resolve();
-    await expect(page.getByRole("alert")).toHaveText("페이지 조회 실패 검증");
+    await expect(page.locator('.error-notice[role="alert"]')).toHaveText(
+      "페이지 조회 실패 검증",
+    );
     await expect(page.getByRole("status")).toHaveCount(0);
     await expect(page.getByRole("table")).toHaveCount(0);
     await expect(
-      page.getByText("Focus page 2 asset 1", { exact: true }),
+      page.getByRole("link", {
+        name: "Focus page 2 asset 1 Synthetic pagination fixture",
+        exact: true,
+      }),
     ).toHaveCount(0);
   } finally {
     secondPage.resolve();

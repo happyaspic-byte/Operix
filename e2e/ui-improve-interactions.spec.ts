@@ -352,12 +352,16 @@ test("customer import preserves kind, mapping, preview and discard confirmation"
   ).toBeVisible();
   await dialog.getByText("변경 1개 보기").click();
   await expect(dialog.getByText('업종: "이전 업종" → "새 업종"')).toBeVisible();
-  await dialog.getByLabel("업종", { exact: true }).selectOption("분류");
+  await dialog
+    .getByRole("combobox", { name: "업종", exact: true })
+    .selectOption("분류");
   await expect(
     dialog.getByRole("button", { name: "확인한 내용 반영" }),
   ).toBeDisabled();
   await dialog.getByRole("button", { name: "미리보기 검증" }).click();
-  await expect(dialog.getByLabel("업종", { exact: true })).toBeDisabled();
+  await expect(
+    dialog.getByRole("combobox", { name: "업종", exact: true }),
+  ).toBeDisabled();
   await expect.poll(() => releases.length).toBe(2);
   releases[1]();
   await expect(
@@ -367,7 +371,9 @@ test("customer import preserves kind, mapping, preview and discard confirmation"
   page.once("dialog", (confirmation) => confirmation.dismiss());
   await dialog.press("Escape");
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByLabel("업종", { exact: true })).toHaveValue("분류");
+  await expect(
+    dialog.getByRole("combobox", { name: "업종", exact: true }),
+  ).toHaveValue("분류");
   page.once("dialog", (confirmation) => confirmation.accept());
   await dialog.press("Escape");
   await expect(dialog).not.toBeVisible();
