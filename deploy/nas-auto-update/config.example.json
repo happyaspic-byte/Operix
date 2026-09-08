@@ -1,0 +1,11 @@
+{
+  "portainer_url": "http://127.0.0.1:9000",
+  "endpoint_id": 3,
+  "stack_id": 19,
+  "stack_name": "operix",
+  "repository": "happyaspic-byte/Operix",
+  "workflow_id": 350530126,
+  "poll_seconds": 60,
+  "health_url": "https://operix.example.com/api/health",
+  "network_mode": "host"
+}

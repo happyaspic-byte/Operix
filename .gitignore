@@ -10,3 +10,8 @@ playwright-report/
 *.tsbuildinfo
 coverage/
 .DS_Store
+
+# Python deployment tooling
+__pycache__/
+*.py[cod]
+deploy-artifact/

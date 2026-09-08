@@ -41,6 +41,10 @@ docker compose logs --tail=80 migrate web worker scanner
 
 migrate 완료 후 web/worker가 시작된다. 최초 로그인과 관리자 비밀번호 재설정 이후에는 본인 비밀번호를 변경해야 업무에 접근할 수 있다. 기존 관리자 비밀번호는 seed가 덮어쓰지 않는다. 초기 계정 발급은 관리자의 설정 화면을 사용하고 사내 전달 절차를 따른다. MFA/IdP는 아직 연결되지 않았다.
 
+## GitHub 변경 자동 반영
+
+기존 Portainer NAS 스택의 자동 갱신은 [GitHub main → NAS 자동배포](../deploy/nas-auto-update/README.md)를 따른다. `main`의 두 CI 검증 작업이 모두 성공하면 검증한 컨테이너 이미지를 게시하고, NAS 업데이터가 60초 간격으로 새 배포를 확인한다. 기존 운영 Compose·데이터 볼륨을 보존하며 앱 이미지 변수만 갱신한다. PR은 운영에 배포하지 않는다.
+
 ## 같은 호스트의 별도 검증 환경
 
 운영과 검증을 함께 둘 때는 별도 저장소/worktree와 `.env`를 준비하고 아래 네 값을 환경마다 고유하게 지정한다. Compose 프로젝트명만 바꾸면 명시적 이름을 쓰는 업로드 볼륨은 분리되지 않는다.

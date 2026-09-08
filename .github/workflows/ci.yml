@@ -54,6 +54,8 @@ jobs:
         run: npm run typecheck && npm run lint
       - name: Domain and security tests against PostgreSQL
         run: npm test
+      - name: NAS deployment contract tests
+        run: python3 -m unittest discover -s tests -p 'test_nas_*.py'
       - run: npm run db:migrate
       - run: npm run db:seed
       - run: npm run build
@@ -157,6 +159,65 @@ jobs:
           docker compose exec -T db psql -U operix -d operix -c "UPDATE job_runs SET last_success=now()-interval '10 minutes' WHERE id='worker'"
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/health)" = 503
           docker compose start worker
+      - name: Export the exact verified application image
+        if: >-
+          github.repository == 'happyaspic-byte/Operix' &&
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tested_container=$(docker compose ps -q web)
+          test -n "$tested_container"
+          tested_image_id=$(docker inspect --format '{{.Image}}' "$tested_container")
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$tested_image_id")" = linux/amd64
+          deployment_image="operix:github-${GITHUB_SHA}"
+          docker tag "$tested_image_id" "$deployment_image"
+          mkdir -p deploy-artifact
+          docker save "$deployment_image" | gzip -n > deploy-artifact/operix-image.tar.gz
+          python3 scripts/create-deploy-manifest.py create deploy-artifact/operix-image.tar.gz \
+            --output deploy-artifact/manifest.json --revision "$GITHUB_SHA" \
+            --image-id "$tested_image_id" --run-id "$GITHUB_RUN_ID"
+      - name: Retain tested NAS image for the publisher
+        if: >-
+          github.repository == 'happyaspic-byte/Operix' &&
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v4
+        with:
+          name: operix-nas-image
+          path: |
+            deploy-artifact/manifest.json
+            deploy-artifact/operix-image.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
       - name: Stop disposable containers
         if: always()
         run: docker compose down -v
+  publish:
+    needs: [application, container]
+    if: >-
+      github.repository == 'happyaspic-byte/Operix' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: operix-nas-image
+          path: deploy-artifact
+      - name: Publish immutable release and advance NAS manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/create-deploy-manifest.py publish \
+            deploy-artifact/manifest.json deploy-artifact/operix-image.tar.gz \
+            --revision "$GITHUB_SHA"

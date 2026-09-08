@@ -9,3 +9,6 @@ test-results
 playwright-report
 docs/screenshots
 *.tsbuildinfo
+deploy-artifact
+**/__pycache__
+**/*.py[cod]
