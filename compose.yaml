@@ -1,85 +1,380 @@
-name: operix
-x-app: &app
-  image: operix:${OPERIX_IMAGE_TAG:-local}
-  build: .
-  env_file: .env
-  environment:
-    DATABASE_URL: postgresql://operix:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/operix
-    OPERIX_EMBEDDED: "0"
-    UPLOAD_DIR: /app/storage/uploads
-    SECURITY_LOG_DIR: /app/storage/security
-    WORKER_REQUIRED: "1"
-    FILE_SCAN_MODE: ${FILE_SCAN_MODE:-clamav}
-    CLAMD_HOST: scanner
-  volumes:
-    - uploads:/app/storage/uploads
-    - security:/app/storage/security
-  init: true
-services:
-  scanner:
-    image: clamav/clamav:1.4
-    entrypoint: ["/bin/sh", "/operix-scanner.sh"]
-    restart: unless-stopped
-    volumes:
-      - scanner:/var/lib/clamav
-      - ./deploy/scanner-entrypoint.sh:/operix-scanner.sh:ro
-    mem_limit: 4g
-  db:
-    image: postgres:17-bookworm
-    environment:
-      POSTGRES_DB: operix
-      POSTGRES_USER: operix
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-    volumes:
-      - database:/var/lib/postgresql/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U operix -d operix"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-  migrate:
-    <<: *app
-    command:
-      [
+{
+  "name": "operix",
+  "networks": {
+    "default": {
+      "external": true,
+      "name": "${OPERIX_APP_NETWORK:-operix_default}"
+    },
+    "proxy": {
+      "external": true,
+      "name": "${OPERIX_PROXY_NETWORK:-npm_default}"
+    }
+  },
+  "services": {
+    "backup": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "command": [
+        "set -eu\numask 077\ncase \"$$DEPLOYMENT_ID\" in ''|*[!a-zA-Z0-9_-]*) echo \"Invalid deployment ID\" >&2; exit 1;; esac\n[ \"$${#DEPLOYMENT_ID}\" -le 128 ]\nmkdir -p /backups\nchmod 700 /backups\nfile=\"/backups/$$DEPLOYMENT_ID.dump\"\nif [ -f \"$$file\" ]; then\n  pg_restore --list \"$$file\" > /dev/null\n  echo \"Existing deployment backup verified\"\n  exit 0\nfi\ntrap 'rm -f -- \"$$file.part\"' EXIT\npg_dump --format=custom --file=\"$$file.part\"\npg_restore --list \"$$file.part\" > /dev/null\nmv -- \"$$file.part\" \"$$file\"\necho \"Pre-migration database backup completed\"\nls -1t /backups/*.dump | sed -n '8,$$p' | while IFS= read -r old; do rm -f -- \"$$old\"; done\n"
+      ],
+      "cpu_shares": 128,
+      "depends_on": {
+        "db": {
+          "condition": "service_healthy"
+        }
+      },
+      "entrypoint": [
+        "/bin/sh",
+        "-ec"
+      ],
+      "environment": {
+        "DEPLOYMENT_ID": "9e063a36f761a928165e8b62e7034e608d1f00b9-34246817256",
+        "PGDATABASE": "operix",
+        "PGHOST": "db",
+        "PGPASSWORD": "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}",
+        "PGUSER": "operix"
+      },
+      "image": "postgres@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "mem_limit": "512m",
+      "read_only": true,
+      "restart": "no",
+      "volumes": [
+        "backups:/backups"
+      ]
+    },
+    "db": {
+      "cpu_shares": 512,
+      "environment": {
+        "POSTGRES_DB": "operix",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}",
+        "POSTGRES_USER": "operix"
+      },
+      "healthcheck": {
+        "interval": "10s",
+        "retries": 12,
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U operix -d operix"
+        ],
+        "timeout": "5s"
+      },
+      "image": "postgres@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "mem_limit": "1g",
+      "restart": "unless-stopped",
+      "volumes": [
+        "database:/var/lib/postgresql/data"
+      ]
+    },
+    "deployment-check": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "command": [
+        "true"
+      ],
+      "cpu_shares": 128,
+      "depends_on": {
+        "https": {
+          "condition": "service_started"
+        },
+        "web": {
+          "condition": "service_healthy"
+        },
+        "worker": {
+          "condition": "service_started"
+        }
+      },
+      "image": "postgres@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0",
+      "labels": {
+        "operix.deployment": "9e063a36f761a928165e8b62e7034e608d1f00b9-34246817256"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "2",
+          "max-size": "1m"
+        }
+      },
+      "mem_limit": "64m",
+      "read_only": true,
+      "restart": "no"
+    },
+    "https": {
+      "cpu_shares": 128,
+      "depends_on": {
+        "web": {
+          "condition": "service_healthy"
+        }
+      },
+      "image": "nginx@sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "mem_limit": "128m",
+      "ports": [
+        "${OPERIX_BIND_IP:?Set OPERIX_BIND_IP}:${OPERIX_HTTPS_PORT:-9010}:443"
+      ],
+      "restart": "unless-stopped",
+      "volumes": [
+        "https:/etc/nginx/conf.d:ro"
+      ]
+    },
+    "migrate": {
+      "command": [
         "sh",
         "-c",
-        "node scripts/prepare-storage.mjs && node --import tsx scripts/migrate.ts && node --import tsx scripts/seed.ts",
+        "node scripts/prepare-storage.mjs && node --import tsx scripts/migrate.ts"
+      ],
+      "cpu_shares": 256,
+      "depends_on": {
+        "backup": {
+          "condition": "service_completed_successfully"
+        },
+        "db": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "ADMIN_EMAIL": "${ADMIN_EMAIL:?Set ADMIN_EMAIL in Portainer}",
+        "ADMIN_PASSWORD": "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in Portainer}",
+        "APP_URL": "${APP_URL:?Set APP_URL in Portainer}",
+        "BACKUP_REQUIRED": "${BACKUP_REQUIRED:-0}",
+        "CLAMD_HOST": "scanner",
+        "CLAMD_PORT": "3310",
+        "DATABASE_URL": "postgresql://operix:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/operix",
+        "FILE_SCAN_MODE": "clamav",
+        "NEXT_TELEMETRY_DISABLED": "1",
+        "NODE_ENV": "production",
+        "OPERIX_EMBEDDED": "0",
+        "SECURITY_LOG_DIR": "/app/storage/security",
+        "SECURITY_LOG_KEY": "${SECURITY_LOG_KEY:?Set SECURITY_LOG_KEY in Portainer}",
+        "SEED_DEMO": "0",
+        "SESSION_IDLE_MINUTES": "30",
+        "SESSION_SECRET": "${SESSION_SECRET:?Set SESSION_SECRET in Portainer}",
+        "TRUST_PROXY_HEADERS": "1",
+        "UPLOAD_DIR": "/app/storage/uploads",
+        "UPLOAD_STORAGE_LIMIT_MB": "${UPLOAD_STORAGE_LIMIT_MB:-10240}",
+        "WORKER_REQUIRED": "1"
+      },
+      "image": "ghcr.io/happyaspic-byte/operix@sha256:5abb489086785b566354feaf9f28bda0e8620e7b969bd9535e6a7375d2c4e6be",
+      "init": true,
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "mem_limit": "1g",
+      "restart": "no",
+      "volumes": [
+        "uploads:/app/storage/uploads",
+        "security:/app/storage/security"
       ]
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: "no"
-  web:
-    <<: *app
-    ports:
-      - "127.0.0.1:${OPERIX_PORT:-3000}:3000"
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
+    },
+    "scanner": {
+      "command": [
+        "#!/bin/sh\nset -eu\nscanner_config=/etc/clamav/clamd.conf\n# Preserve upstream defaults and database updates; override only bounded scan policy.\ntest -f \"$$scanner_config\"\nfor scanner_key in AlertEncrypted AlertExceedsMax StreamMaxLength MaxScanSize MaxFileSize MaxFiles MaxRecursion MaxThreads MaxQueue MaxScanTime; do\n  sed -i \"/^$${scanner_key}[[:space:]]/d\" \"$$scanner_config\"\ndone\ncat >> \"$$scanner_config\" <<'CONF'\nAlertEncrypted yes\nAlertExceedsMax yes\nStreamMaxLength 21M\nMaxScanSize 64M\nMaxFileSize 21M\nMaxFiles 2000\nMaxRecursion 8\nMaxThreads 4\nMaxQueue 8\nMaxScanTime 15000\nCONF\nexec /init \"$$@\"\n"
+      ],
+      "cpu_shares": 128,
+      "entrypoint": [
+        "/bin/sh",
+        "-c"
+      ],
+      "healthcheck": {
+        "interval": "15s",
+        "retries": 12,
+        "start_period": "180s",
+        "test": [
+          "CMD",
+          "clamdscan",
+          "--ping=1"
+        ],
+        "timeout": "10s"
+      },
+      "image": "clamav/clamav@sha256:b25d9199257ae7ef45e0cc4c7eaa60ce7e5447796f0090d5ff311d1a30980cc3",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "mem_limit": "4g",
+      "restart": "unless-stopped",
+      "volumes": [
+        "scanner:/var/lib/clamav"
+      ]
+    },
+    "web": {
+      "cpu_shares": 512,
+      "depends_on": {
+        "migrate": {
+          "condition": "service_completed_successfully"
+        },
+        "scanner": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "ADMIN_EMAIL": "${ADMIN_EMAIL:?Set ADMIN_EMAIL in Portainer}",
+        "ADMIN_PASSWORD": "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in Portainer}",
+        "APP_URL": "${APP_URL:?Set APP_URL in Portainer}",
+        "BACKUP_REQUIRED": "${BACKUP_REQUIRED:-0}",
+        "CLAMD_HOST": "scanner",
+        "CLAMD_PORT": "3310",
+        "DATABASE_URL": "postgresql://operix:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/operix",
+        "FILE_SCAN_MODE": "clamav",
+        "NEXT_TELEMETRY_DISABLED": "1",
+        "NODE_ENV": "production",
+        "OPERIX_EMBEDDED": "0",
+        "SECURITY_LOG_DIR": "/app/storage/security",
+        "SECURITY_LOG_KEY": "${SECURITY_LOG_KEY:?Set SECURITY_LOG_KEY in Portainer}",
+        "SEED_DEMO": "0",
+        "SESSION_IDLE_MINUTES": "30",
+        "SESSION_SECRET": "${SESSION_SECRET:?Set SESSION_SECRET in Portainer}",
+        "TRUST_PROXY_HEADERS": "1",
+        "UPLOAD_DIR": "/app/storage/uploads",
+        "UPLOAD_STORAGE_LIMIT_MB": "${UPLOAD_STORAGE_LIMIT_MB:-10240}",
+        "WORKER_REQUIRED": "1"
+      },
+      "healthcheck": {
+        "interval": "15s",
+        "retries": 5,
+        "start_period": "30s",
+        "test": [
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
-        ]
-      interval: 15s
-      timeout: 5s
-      start_period: 15s
-      retries: 5
-  worker:
-    <<: *app
-    command: ["node", "--import", "tsx", "scripts/worker.ts"]
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    restart: unless-stopped
-volumes:
-  database:
-  uploads:
-    name: ${OPERIX_UPLOAD_VOLUME:-operix_uploads}
-  security:
-  scanner:
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "timeout": "5s"
+      },
+      "image": "ghcr.io/happyaspic-byte/operix@sha256:5abb489086785b566354feaf9f28bda0e8620e7b969bd9535e6a7375d2c4e6be",
+      "init": true,
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "mem_limit": "2g",
+      "networks": {
+        "default": {},
+        "proxy": {
+          "aliases": [
+            "operix-web"
+          ]
+        }
+      },
+      "ports": [
+        "127.0.0.1:${OPERIX_PORT:-9010}:3000"
+      ],
+      "restart": "unless-stopped",
+      "volumes": [
+        "uploads:/app/storage/uploads",
+        "security:/app/storage/security"
+      ]
+    },
+    "worker": {
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "scripts/worker.ts"
+      ],
+      "cpu_shares": 256,
+      "depends_on": {
+        "migrate": {
+          "condition": "service_completed_successfully"
+        },
+        "scanner": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "ADMIN_EMAIL": "${ADMIN_EMAIL:?Set ADMIN_EMAIL in Portainer}",
+        "ADMIN_PASSWORD": "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in Portainer}",
+        "APP_URL": "${APP_URL:?Set APP_URL in Portainer}",
+        "BACKUP_REQUIRED": "${BACKUP_REQUIRED:-0}",
+        "CLAMD_HOST": "scanner",
+        "CLAMD_PORT": "3310",
+        "DATABASE_URL": "postgresql://operix:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/operix",
+        "FILE_SCAN_MODE": "clamav",
+        "NEXT_TELEMETRY_DISABLED": "1",
+        "NODE_ENV": "production",
+        "OPERIX_EMBEDDED": "0",
+        "SECURITY_LOG_DIR": "/app/storage/security",
+        "SECURITY_LOG_KEY": "${SECURITY_LOG_KEY:?Set SECURITY_LOG_KEY in Portainer}",
+        "SEED_DEMO": "0",
+        "SESSION_IDLE_MINUTES": "30",
+        "SESSION_SECRET": "${SESSION_SECRET:?Set SESSION_SECRET in Portainer}",
+        "TRUST_PROXY_HEADERS": "1",
+        "UPLOAD_DIR": "/app/storage/uploads",
+        "UPLOAD_STORAGE_LIMIT_MB": "${UPLOAD_STORAGE_LIMIT_MB:-10240}",
+        "WORKER_REQUIRED": "1"
+      },
+      "image": "ghcr.io/happyaspic-byte/operix@sha256:5abb489086785b566354feaf9f28bda0e8620e7b969bd9535e6a7375d2c4e6be",
+      "init": true,
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "mem_limit": "1g",
+      "restart": "unless-stopped",
+      "volumes": [
+        "uploads:/app/storage/uploads",
+        "security:/app/storage/security"
+      ]
+    }
+  },
+  "volumes": {
+    "backups": {
+      "external": true,
+      "name": "${OPERIX_BACKUP_VOLUME:-operix_backups}"
+    },
+    "database": {
+      "external": true,
+      "name": "${OPERIX_DB_VOLUME:-operix_database}"
+    },
+    "https": {
+      "external": true,
+      "name": "operix_https"
+    },
+    "scanner": {
+      "external": true,
+      "name": "${OPERIX_SCANNER_VOLUME:-operix_scanner}"
+    },
+    "security": {
+      "external": true,
+      "name": "${OPERIX_SECURITY_VOLUME:-operix_security}"
+    },
+    "uploads": {
+      "external": true,
+      "name": "${OPERIX_UPLOAD_VOLUME:-operix_uploads}"
+    }
+  }
+}
