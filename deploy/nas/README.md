@@ -2,6 +2,8 @@
 
 GitHub `main`의 애플리케이션·컨테이너 검증이 모두 성공하면, 실제 검증한 이미지를 `ghcr.io/happyaspic-byte/operix`에 게시한다. CI는 이미지 digest를 고정한 Compose를 `nas-deploy` 브랜치에 커밋한다. Portainer가 이 브랜치를 1분 간격으로 확인하고 자체 Git 배포 기능으로 적용한다.
 
+1분은 변경 확인 주기다. 전체 반영 시간에는 CI 검증, 이미지 다운로드, 백업과 서비스 시작 시간이 추가된다.
+
 ```text
 main push → application + container 검증 성공
           → GHCR 이미지 게시·익명 다운로드 확인
@@ -13,7 +15,7 @@ main push → application + container 검증 성공
 
 ## 최초 GHCR 공개 설정
 
-이 저장소와 배포 이미지는 공개 배포를 사용한다. GHCR은 첫 패키지를 기본 비공개로 생성하므로 저장소 소유자가 GitHub의 **Packages → operix → Package settings → Change visibility → Public**을 한 번 설정한다. NAS는 이후 별도 GitHub 토큰 없이 이미지를 가져온다. CI는 익명 pull이 되는지 확인하기 전에는 배포 브랜치를 갱신하지 않는다. 공개 대기 단계가 끝나 실패했다면 설정 후 Actions의 **Re-run failed jobs**로 게시 단계를 재개한다.
+이 저장소와 배포 이미지는 공개 배포를 사용한다. GHCR은 첫 패키지를 기본 비공개로 생성하므로 저장소 소유자가 GitHub의 **Packages → operix → Package settings → Change visibility → Public**을 한 번 설정한다. 이미 Public인 패키지는 이 단계를 생략한다. NAS는 이후 별도 GitHub 토큰 없이 이미지를 가져온다. CI는 익명 pull이 되는지 확인하기 전에는 배포 브랜치를 갱신하지 않는다. 공개 대기 단계가 끝나 실패했다면 설정 후 Actions의 **Re-run failed jobs**로 게시 단계를 재개한다.
 
 ## Portainer 설정
 
@@ -80,3 +82,10 @@ python3 -m unittest discover -s tests -p 'test_nas_*.py'
 ```
 
 이 구성은 별도 NAS 상주 업데이터, Portainer 관리 API 키, NAS의 GitHub 인증정보를 요구하지 않는다.
+
+## 2026-09-08 전환 검증 기록
+
+- [첫 전체 CI](https://github.com/happyaspic-byte/Operix/actions/runs/34246817256)가 성공한 `9e063a3` 이미지를 NAS에서 익명 pull하고 Repository 스택으로 배포했다.
+- Portainer 스택 `24`에서 `nas-deploy`의 `232db29` 커밋을 수동 재배포 호출 없이 폴링으로 반영하는 것을 확인했다.
+- 배포 후 DB 행 수·볼륨 연결·앱 환경변수·HTTPS 설정이 유지됐으며, 백업·마이그레이션·상태 확인 서비스가 모두 성공했다. 공개 주소와 NAS 주소의 health 및 정적 파일 응답도 확인했다.
+- 기존 상주 업데이터 컨테이너·설정 볼륨·전용 API 키를 제거했다. 기존 백업 볼륨은 보존했다.
