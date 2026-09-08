@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useModalDialog } from "./use-modal-dialog";
 import { X, Upload, Download, Check } from "lucide-react";
 import { catalog } from "@/lib/catalog";
 import { api, ErrorNotice } from "./ui";
@@ -12,15 +13,12 @@ export function ImportDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null),
+  const dialog = useModalDialog(),
     [file, setFile] = useState<File | null>(null),
     [preview, setPreview] = useState<any>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [mapping, setMapping] = useState<Record<string, string>>({});
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
   function close() {
     if (busy) return;
     if (file && !window.confirm("가져오기 내용을 버리고 닫을까요?")) return;
@@ -61,14 +59,23 @@ export function ImportDialog({
     <dialog
       className="editor-dialog"
       ref={dialog}
+      aria-labelledby="import-dialog-title"
+      aria-busy={busy}
       onCancel={(e) => {
         e.preventDefault();
         close();
       }}
     >
       <div className="dialog-heading">
-        <h2>엑셀에서 {catalog[kind].singular} 가져오기</h2>
-        <button className="icon-button" aria-label="닫기" onClick={close}>
+        <h2 id="import-dialog-title">
+          엑셀에서 {catalog[kind].singular} 가져오기
+        </h2>
+        <button
+          className="icon-button"
+          aria-label="닫기"
+          disabled={busy}
+          onClick={close}
+        >
           <X size={20} />
         </button>
       </div>
@@ -87,6 +94,7 @@ export function ImportDialog({
           <input
             type="file"
             accept=".xlsx,.csv"
+            disabled={busy}
             onChange={(e) => {
               setFile(e.target.files?.[0] || null);
               setPreview(null);
@@ -103,6 +111,7 @@ export function ImportDialog({
                     {label}
                     <select
                       value={mapping[key] || label}
+                      disabled={busy}
                       onChange={(e) => {
                         setMapping({ ...mapping, [key]: e.target.value });
                         setPreview({ ...preview, valid: false });
@@ -128,7 +137,7 @@ export function ImportDialog({
                 <thead>
                   <tr>
                     <th>행</th>
-                    <th>자산</th>
+                    <th>{catalog[kind].singular}</th>
                     <th>작업</th>
                     <th>검증 결과</th>
                   </tr>
@@ -169,7 +178,7 @@ export function ImportDialog({
         )}
       </div>
       <div className="dialog-footer">
-        <button className="button" onClick={close}>
+        <button className="button" disabled={busy} onClick={close}>
           취소
         </button>
         <div>

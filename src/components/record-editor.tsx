@@ -4,6 +4,7 @@ import { X, Plus, Trash2, Save } from "lucide-react";
 import { catalog, type Field } from "@/lib/catalog";
 import { can } from "@/lib/policy";
 import { api, useUser, ErrorNotice } from "./ui";
+import { useModalDialog } from "./use-modal-dialog";
 export function RecordEditor({
   kind,
   initial,
@@ -17,7 +18,9 @@ export function RecordEditor({
 }) {
   const user = useUser(),
     config = catalog[kind],
-    dialog = useRef<HTMLDialogElement>(null),
+    dialog = useModalDialog(),
+    errorSummary = useRef<HTMLDivElement>(null),
+    [fieldErrors, setFieldErrors] = useState<Record<string, string>>({}),
     baseline = useRef(""),
     versionRef = useRef(initial?.version),
     [conflict, setConflict] = useState<Record<string, any> | null>(null),
@@ -58,7 +61,6 @@ export function RecordEditor({
     )
       .then(setLookup)
       .catch((e) => setError(e.message));
-    dialog.current?.showModal();
   }, [kind, initial?.id]);
   const dirty = JSON.stringify(data) !== baseline.current;
   useEffect(() => {
@@ -71,6 +73,9 @@ export function RecordEditor({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
+  useEffect(() => {
+    if (error) errorSummary.current?.focus();
+  }, [error]);
   function close() {
     if (busy) return;
     if (
@@ -96,15 +101,18 @@ export function RecordEditor({
       );
       setLookup((old) => ({ ...old, ...next }));
     } catch (e) {
-      if ((e as Error & { status?: number }).status === 409 && initial?.id) {
-        try {
-          setConflict(await api(`/api/data/${kind}/${initial.id}`));
-        } catch {}
-      }
       setError((e as Error).message);
     }
   }
   function update(key: string, value: any) {
+    setFieldErrors((errors) => {
+      const next = { ...errors };
+      for (const id of Object.keys(next)) {
+        if (id === "field-" + key || id.startsWith("field-" + key + "-item-"))
+          delete next[id];
+      }
+      return next;
+    });
     setData((d) => ({
       ...d,
       [key]: value,
@@ -130,6 +138,11 @@ export function RecordEditor({
       );
       onSaved(saved);
     } catch (e) {
+      if ((e as Error & { status?: number }).status === 409 && initial?.id) {
+        try {
+          setConflict(await api(`/api/data/${kind}/${initial.id}`));
+        } catch {}
+      }
       setError((e as Error).message);
     } finally {
       setBusy(false);
@@ -138,6 +151,10 @@ export function RecordEditor({
   function input(f: Field) {
     const id = "field-" + f.key,
       value = data[f.key] ?? "";
+    const accessibility = {
+      "aria-invalid": Boolean(fieldErrors[id]),
+      "aria-describedby": fieldErrors[id] ? id + "-error" : undefined,
+    };
     if (f.type === "select" || f.type === "relation") {
       let choices =
         f.type === "select"
@@ -162,6 +179,7 @@ export function RecordEditor({
           )}
           <select
             id={id}
+            {...accessibility}
             value={value}
             required={f.required}
             onChange={(e) => update(f.key, e.target.value)}
@@ -182,6 +200,7 @@ export function RecordEditor({
       return (
         <textarea
           id={id}
+          {...accessibility}
           rows={4}
           value={value}
           onChange={(e) => update(f.key, e.target.value)}
@@ -193,7 +212,12 @@ export function RecordEditor({
         (a) => !data.customer_id || a.customer_id === data.customer_id,
       );
       return (
-        <div className="checkbox-list" id={id}>
+        <div
+          className="checkbox-list"
+          id={id}
+          role="group"
+          aria-labelledby={id + "-label"}
+        >
           {candidates.length ? (
             candidates.map((a) => (
               <label key={a.id}>
@@ -225,7 +249,11 @@ export function RecordEditor({
     }
     if (f.type === "checklist")
       return (
-        <div className="checklist-editor">
+        <div
+          className="checklist-editor"
+          role="group"
+          aria-labelledby={id + "-label"}
+        >
           {(data[f.key] || []).map((item: any, i: number) => (
             <div key={i}>
               <input
@@ -241,20 +269,34 @@ export function RecordEditor({
                   )
                 }
               />
-              <input
-                aria-label={`점검 항목 ${i + 1}`}
-                value={item.label}
-                maxLength={300}
-                required
-                onChange={(e) =>
-                  update(
-                    f.key,
-                    data[f.key].map((v: any, n: number) =>
-                      n === i ? { ...v, label: e.target.value } : v,
-                    ),
-                  )
-                }
-              />
+              <div className="checklist-input">
+                <input
+                  id={`${id}-item-${i}`}
+                  aria-invalid={Boolean(fieldErrors[`${id}-item-${i}`])}
+                  aria-describedby={
+                    fieldErrors[`${id}-item-${i}`]
+                      ? `${id}-item-${i}-error`
+                      : undefined
+                  }
+                  aria-label={`점검 항목 ${i + 1}`}
+                  value={item.label}
+                  maxLength={300}
+                  required
+                  onChange={(e) =>
+                    update(
+                      f.key,
+                      data[f.key].map((v: any, n: number) =>
+                        n === i ? { ...v, label: e.target.value } : v,
+                      ),
+                    )
+                  }
+                />
+                {fieldErrors[`${id}-item-${i}`] && (
+                  <p className="field-error" id={`${id}-item-${i}-error`}>
+                    {fieldErrors[`${id}-item-${i}`]}
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
                 className="icon-button"
@@ -288,6 +330,7 @@ export function RecordEditor({
     return (
       <input
         id={id}
+        {...accessibility}
         type={
           f.type === "number" ? "number" : f.type === "date" ? "date" : "text"
         }
@@ -304,19 +347,30 @@ export function RecordEditor({
     <dialog
       ref={dialog}
       className="editor-dialog"
+      aria-labelledby="record-editor-title"
       onCancel={(e) => {
         e.preventDefault();
         close();
       }}
-      onClose={close}
     >
-      <form onSubmit={submit}>
+      <form
+        onSubmit={submit}
+        aria-busy={busy}
+        onInvalid={(event) => {
+          const field = event.target as HTMLInputElement;
+          if (field.id)
+            setFieldErrors((errors) => ({
+              ...errors,
+              [field.id]: field.validationMessage,
+            }));
+        }}
+      >
         <div className="dialog-heading">
           <div>
             <span className="eyebrow">
               {initial?.id ? "EDIT RECORD" : "NEW RECORD"}
             </span>
-            <h2>
+            <h2 id="record-editor-title">
               {config.singular} {initial?.id ? "수정" : "등록"}
             </h2>
           </div>
@@ -324,6 +378,7 @@ export function RecordEditor({
             type="button"
             className="icon-button"
             aria-label="닫기"
+            disabled={busy}
             onClick={close}
           >
             <X size={20} />
@@ -334,7 +389,9 @@ export function RecordEditor({
             입력 중인 내용은 이 화면에만 유지됩니다. 로그인 만료 시 다른 탭에서
             다시 로그인한 뒤 저장하세요. 탭을 닫으면 입력 내용이 사라집니다.
           </p>
-          <ErrorNotice message={error} />
+          <div ref={errorSummary} tabIndex={-1}>
+            <ErrorNotice message={error} />
+          </div>
           {conflict && (
             <div className="privacy-preview">
               <h3>다른 사용자의 수정과 비교</h3>
@@ -409,11 +466,23 @@ export function RecordEditor({
                   className={`form-field ${["textarea", "assets", "checklist"].includes(f.type || "") ? "full" : ""}`}
                   key={f.key}
                 >
-                  <label htmlFor={"field-" + f.key}>
+                  <label
+                    id={"field-" + f.key + "-label"}
+                    htmlFor={
+                      ["assets", "checklist"].includes(f.type || "")
+                        ? undefined
+                        : "field-" + f.key
+                    }
+                  >
                     {f.label}
                     {f.required && <span className="required">*</span>}
                   </label>
                   {input(f)}
+                  {fieldErrors["field-" + f.key] && (
+                    <p className="field-error" id={"field-" + f.key + "-error"}>
+                      {fieldErrors["field-" + f.key]}
+                    </p>
+                  )}
                 </div>
               ))}
           </div>

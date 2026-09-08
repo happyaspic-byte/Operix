@@ -57,7 +57,8 @@ a {
 button {
   cursor: pointer;
 }
-button:disabled {
+button:disabled,
+button[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.5;
 }
@@ -689,6 +690,7 @@ small {
   color: var(--green);
 }
 .table-scroll {
+  position: relative;
   overflow: auto;
   width: 100%;
 }
@@ -1367,7 +1369,7 @@ td small {
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: #66795c;
+  color: #566b4d;
   margin-bottom: 18px;
 }
 .detail-heading h1 {
@@ -1375,7 +1377,7 @@ td small {
 }
 .detail-kicker {
   font-size: 10px;
-  color: #647958;
+  color: #566b4d;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -2563,4 +2565,129 @@ td small {
 .sidebar {
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+/* Keep dense records readable without removing columns on narrow screens. */
+.records-table {
+  width: max-content;
+  min-width: 100%;
+}
+.records-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 24rem;
+  vertical-align: top;
+}
+.records-table td > span:not(.badge) {
+  display: inline-block;
+  max-width: 22rem;
+}
+.record-name {
+  align-items: flex-start;
+  min-width: 12rem;
+  max-width: 22rem;
+}
+.record-name > span:last-child {
+  min-width: 0;
+}
+.numeric-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.table-scroll:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+.page-heading > div,
+.dialog-heading > div {
+  min-width: 0;
+}
+.page-heading h1,
+.dialog-heading h2 {
+  overflow-wrap: anywhere;
+}
+.form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.form-field > label,
+.form-field input,
+.form-field select,
+.form-field textarea {
+  font-size: 13px;
+}
+.field-error {
+  color: #a33727;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+}
+.form-field [aria-invalid="true"] {
+  border-color: #a33727;
+}
+.dialog-heading {
+  gap: 12px;
+}
+.dialog-heading .icon-button {
+  flex-shrink: 0;
+}
+.dialog-footer,
+.dialog-footer > div {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.editor-dialog.compact {
+  max-width: calc(100vw - 24px);
+}
+.mobile-nav-close {
+  align-self: flex-end;
+  flex-shrink: 0;
+}
+@media (max-width: 760px) {
+  .sidebar {
+    visibility: hidden;
+    overflow-y: auto;
+  }
+  .sidebar.is-open {
+    visibility: visible;
+  }
+  .page-heading {
+    flex-wrap: wrap;
+  }
+  .heading-actions {
+    flex-wrap: wrap;
+  }
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .form-field input,
+  .form-field select,
+  .form-field textarea {
+    font-size: 16px;
+  }
+  .dialog-footer .button,
+  .dialog-heading .icon-button,
+  .mobile-menu,
+  .mobile-nav-close {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .dialog-footer {
+    padding: 14px 18px;
+  }
+  .table-footer {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+}
+
+.checklist-input {
+  flex: 1;
+  min-width: 0;
+}
+.checklist-input .field-error {
+  margin-top: 6px;
+}
+.records-table .date-cell {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }

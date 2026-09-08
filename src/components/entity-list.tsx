@@ -30,6 +30,7 @@ export function EntityList({ entity }: { entity: string }) {
     [page, setPage] = useState(1),
     [data, setData] = useState<any>(null),
     [error, setError] = useState(""),
+    [loading, setLoading] = useState(true),
     [editor, setEditor] = useState(false),
     [importer, setImporter] = useState(false),
     [revision, setRevision] = useState(0),
@@ -87,15 +88,24 @@ export function EntityList({ entity }: { entity: string }) {
   useEffect(() => {
     if (!ready) return;
     const c = new AbortController();
+    setLoading(true);
+    setError("");
     const timer = setTimeout(
       () => {
         api(`/api/data/${kind}?` + filters.toString(), { signal: c.signal })
           .then((d) => {
+            if (c.signal.aborted) return;
             setData(d);
             setError("");
           })
           .catch((e) => {
-            if (e.name !== "AbortError") setError(e.message);
+            if (!c.signal.aborted && e.name !== "AbortError") {
+              setData(null);
+              setError(e.message);
+            }
+          })
+          .finally(() => {
+            if (!c.signal.aborted) setLoading(false);
           });
       },
       query ? 200 : 0,
@@ -141,6 +151,16 @@ export function EntityList({ entity }: { entity: string }) {
       setError("이 브라우저에서는 보기 설정을 저장할 수 없습니다.");
     }
   }
+  function clearFilters() {
+    setQuery("");
+    setStatus("");
+    setMine(false);
+    setFrom("");
+    setTo("");
+    setExpiry("");
+    setPage(1);
+  }
+  const filtered = Boolean(query || status || mine || from || to || expiry);
   const statusField = config.fields.find((f) => f.key === "status");
   const tabs =
     entity === "customers"
@@ -400,41 +420,65 @@ export function EntityList({ entity }: { entity: string }) {
           >
             현재 필터 저장
           </button>
+          {filtered && (
+            <button className="button small" onClick={clearFilters}>
+              검색·필터 초기화
+            </button>
+          )}
           <small>보기 설정은 이 브라우저에 저장됩니다.</small>
         </div>
         <ErrorNotice message={error} />
-        {data ? (
-          <RecordTable kind={kind} rows={data.rows} visibleColumns={columns} />
-        ) : (
+        {loading ? (
           <Loading />
-        )}
-        <div className="table-footer">
-          <span>
-            총 <strong>{data?.total ?? 0}</strong>건
-            {kind === "assets" ? " · 최근 확인 상태 기준" : ""}
-          </span>
-          <div>
-            <button
-              className="icon-button"
-              aria-label="이전 페이지"
-              disabled={page === 1}
-              onClick={() => setPage(page - 1)}
-            >
-              <ChevronLeft size={16} />
-            </button>
+        ) : data ? (
+          <RecordTable
+            kind={kind}
+            rows={data.rows}
+            visibleColumns={columns}
+            filtered={filtered}
+          />
+        ) : null}
+        {data && (
+          <div className="table-footer" aria-busy={loading}>
             <span>
-              {page} / {Math.max(1, Math.ceil((data?.total || 0) / 20))}
+              {loading ? (
+                "조회 중…"
+              ) : (
+                <>
+                  총 <strong>{data.total}</strong>건
+                  {kind === "assets" ? " · 최근 확인 상태 기준" : ""}
+                </>
+              )}
             </span>
-            <button
-              className="icon-button"
-              aria-label="다음 페이지"
-              disabled={page * 20 >= (data?.total || 0)}
-              onClick={() => setPage(page + 1)}
-            >
-              <ChevronRight size={16} />
-            </button>
+            <div>
+              <button
+                className="icon-button"
+                aria-label="이전 페이지"
+                aria-disabled={loading || page === 1}
+                onClick={() => {
+                  if (!loading && page > 1) setPage(page - 1);
+                }}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span>
+                {loading
+                  ? "…"
+                  : `${page} / ${Math.max(1, Math.ceil(data.total / 20))}`}
+              </span>
+              <button
+                className="icon-button"
+                aria-label="다음 페이지"
+                aria-disabled={loading || page * 20 >= data.total}
+                onClick={() => {
+                  if (!loading && page * 20 < data.total) setPage(page + 1);
+                }}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
       {editor && (
         <RecordEditor
