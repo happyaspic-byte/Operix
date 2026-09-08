@@ -87,6 +87,7 @@ jobs:
             test-results/e2e-results.json
             test-results/accessibility.json
             test-results/screenshots
+            test-results/ui-improve
             test-results/sample-report.pdf
             .data/performance.json
             playwright-report
