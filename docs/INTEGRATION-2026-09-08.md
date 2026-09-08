@@ -44,7 +44,7 @@
 | `npm run typecheck` | UI 통합 후 소스, Node 24.20.0 | 통과, 종료 코드 0. 로컬 산출물 `test-results/integration-20260908/typecheck.log` |
 | `npm run lint` | UI 통합 후 소스, oxlint | 통과, 종료 코드 0. 로컬 산출물 `test-results/integration-20260908/lint.log` |
 | `npm run build` | UI 통합 후 소스, Next.js 16.3.4 webpack | 통과, 종료 코드 0. 로컬 산출물 `test-results/integration-20260908/build.log` |
-| 전체 브라우저·API E2E | `a696ea7`, 새 PostgreSQL 17 앱 DB, 운영 빌드·Chromium | 33/33 통과, 종료 코드 0, 153.7초. 재시도·건너뜀·예상 밖 실패·flaky 0. 로그 `test-results/integration-20260908/e2e.log`, JSON `test-results/e2e-results.json` |
+| 전체 브라우저·API E2E | `a696ea7`, 새 PostgreSQL 17 앱 DB, 운영 빌드·Chromium | 33/33 통과, 종료 코드 0, 153.7초. 재시도·건너뜀·예상 밖 실패·flaky 0. 로그 `test-results/integration-20260908/e2e.log`, 보존 JSON `test-results/integration-20260908/e2e-final-results.json` |
 | UI 접근성 자동 검사 | 1440·768·390px의 대시보드·자산·상세·편집·가져오기 15건 및 모바일 메뉴 1건 | axe 결과 16개 모두 serious·critical 0. 로컬 산출물 `test-results/ui-improve/axe/` |
 | UI 화면 시각 검토 | 자산 1440·390px, 편집·가져오기 390px | 검토한 PNG 4개에서 주요 잘림 없음. 로컬 산출물 `test-results/ui-improve/after/` |
 | 원격 GitHub Actions | 각 push의 커밋 | 커밋별 실행 결과는 [GitHub Actions](https://github.com/happyaspic-byte/Operix/actions/workflows/ci.yml)에서 확인 |
@@ -52,6 +52,8 @@
 단위·DB 검증은 보안·버그 통합 후 실행했으며 이후 해당 앱 로직·단위 테스트는 바뀌지 않았다. 전체 E2E는 UI 통합과 테스트 수정까지 포함한 별도 실행이다. `test-results/`는 Git에서 제외된 로컬 실행 산출물 경로이며 원격 CI는 실행별 아티팩트로 결과와 UI 증거를 보관한다.
 
 첫 전체 E2E는 31개 통과·선택자 관련 2개 실패였다. `a696ea7`에서 실제 접근 가능한 컨트롤 이름에 선택자를 맞추고 해당 2개 검증을 통과한 뒤, 앱 DB를 새로 준비해 전체 33개를 재실행했다. 이 과정에서 앱 코드는 수정하지 않았다. 최종 실행은 `E2E_START_SERVER=1 npm run test:e2e -- --output=test-results/integration-e2e-final --trace=off --retries=0`이며 전용 환경의 `APP_URL`·`PORT`와 가상 자료를 사용했다.
+
+첫 원격 검증([aafedd0 실행](https://github.com/happyaspic-byte/Operix/actions/runs/34211661306))은 PostgreSQL 110개와 container 작업이 통과했지만, E2E에서 페이지 전환용 로딩 표시와 목록 로딩 표시가 동시에 매칭되어 32개 통과·1개 실패로 종료됐다. 해당 선택자를 `.list-panel` 안으로 한정하고 같은 시나리오를 로컬에서 재시도 없이 3회 연속 통과했다. 대기·빈 목록·조회 실패의 검증 조건과 앱 구현은 유지했다. 후속 커밋의 전체 원격 결과는 위 GitHub Actions 링크에서 확인한다.
 
 9월 5일의 Docker·ClamAV·암호화 백업/복구·CI 결과는 [기존 검증 기록](VERIFICATION.md)의 해당 코드 기준에 속한다. 이번 로컬 실행은 PostgreSQL 앱 검증이며 배포 컨테이너·실제 ClamAV·암호화 복구의 재검증 결과를 포함하지 않는다. 원격 CI의 해당 검사 결과는 대상 커밋의 실행에서 확인한다. 기존 검증 문서의 화면 이미지는 9월 5일 기록으로 유지한다.
 

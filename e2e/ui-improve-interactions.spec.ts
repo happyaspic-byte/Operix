@@ -594,7 +594,7 @@ test("pending, genuinely empty and failed views remain distinct", async ({
     await route.fulfill({ response, json: { ...data, rows: [], total: 0 } });
   });
   await page.goto("/customers");
-  await expect(page.locator(".loading[role=status]")).toBeVisible();
+  await expect(page.locator(".list-panel .loading[role=status]")).toBeVisible();
   await expect(page.locator(".empty-state")).toHaveCount(0);
   release();
   await expect(page.getByText("아직 등록된 정보가 없습니다.")).toBeVisible();
