@@ -89,9 +89,12 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
   function renderValue(f: any) {
     const v = record[f.key];
     if (f.type === "assets")
-      return (data.related.assets || []).map((a: any) => (
+      return (
+        kind === "inspections" ? record.assets || [] : data.related.assets || []
+      ).map((a: any) => (
         <Link className="inline-link" key={a.id} href={"/assets/" + a.id}>
           {a.name}
+          {kind === "inspections" && ` · ${a.asset_tag || "자산번호 미등록"}`}
         </Link>
       ));
     if (f.type === "checklist")
@@ -361,6 +364,13 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
                     kind: tab,
                     initial: {
                       ...(kind === "assets" ? { asset_id: id } : {}),
+                      ...(tab === "inspections" && kind === "assets"
+                        ? {
+                            customer_id: record.customer_id,
+                            customer_name: record.customer_name,
+                            assets: [record],
+                          }
+                        : {}),
                       ...(kind === "customers" ? { customer_id: id } : {}),
                       ...(kind === "sites"
                         ? { site_id: id, customer_id: record.customer_id }

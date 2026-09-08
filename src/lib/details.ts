@@ -77,7 +77,10 @@ export async function details(
         "contracts",
         `${selection("contracts")} WHERE e.id IN (SELECT contract_id FROM contract_assets WHERE asset_id=$1)`,
       ],
-      ["inspections", `${selection("inspections")} WHERE e.asset_id=$1`],
+      [
+        "inspections",
+        `${selection("inspections")} WHERE e.asset_id=$1 OR EXISTS (SELECT 1 FROM inspection_assets ia WHERE ia.inspection_id=e.id AND ia.asset_id=$1)`,
+      ],
       [
         "tickets",
         `${selection("tickets")} WHERE e.id IN (SELECT ticket_id FROM ticket_assets WHERE asset_id=$1)`,
@@ -93,6 +96,11 @@ export async function details(
     queries.push([
       "assets",
       `${selection("assets")} WHERE e.id IN (SELECT asset_id FROM ticket_assets WHERE ticket_id=$1)`,
+    ]);
+  if (kind === "inspections")
+    queries.push([
+      "assets",
+      `${selection("assets")} WHERE e.id IN (SELECT asset_id FROM inspection_assets WHERE inspection_id=$1 UNION SELECT asset_id FROM inspections WHERE id=$1)`,
     ]);
   if (kind === "maintenance_plans")
     queries.push([

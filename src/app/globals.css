@@ -1318,6 +1318,33 @@ td small {
 .checkbox-list input {
   width: 15px;
 }
+.inspection-asset-picker {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border-radius: 7px;
+}
+.inspection-asset-summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12px;
+}
+.inspection-asset-summary .footnote {
+  margin: 0;
+}
+.inspection-asset-selected {
+  background: #f5f8f1;
+  max-height: 240px;
+}
+.inspection-asset-picker .checkbox-list label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.inspection-asset-picker .checkbox-list input {
+  flex-shrink: 0;
+}
 .checklist-editor > div {
   display: flex;
   align-items: center;

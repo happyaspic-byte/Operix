@@ -8,6 +8,25 @@ export function validateEntity(
 ): Record<string, any> {
   const config = catalog[kind];
   if (!config) throw new AppError(404, "자료 유형을 찾을 수 없습니다.");
+  if (kind === "inspections") {
+    input = { ...input };
+    // Older clients still send the single representative target.
+    if (Object.hasOwn(input, "asset_id")) {
+      const legacy = z.string().uuid().safeParse(input.asset_id);
+      if (!legacy.success)
+        throw new AppError(400, "대상 자산: 올바른 자산을 선택해 주세요.");
+      if (!Object.hasOwn(input, "asset_ids")) input.asset_ids = [legacy.data];
+      else if (
+        !Array.isArray(input.asset_ids) ||
+        input.asset_ids[0] !== legacy.data
+      )
+        throw new AppError(
+          400,
+          "대표 자산과 선택한 대상 자산을 확인해 주세요.",
+        );
+      delete input.asset_id;
+    }
+  }
   const shape: Record<string, z.ZodType> = {};
   for (const field of config.fields) {
     let schema: z.ZodType;
@@ -21,9 +40,10 @@ export function validateEntity(
         )
         .max(100)
         .default([]);
-    else if (field.type === "assets")
-      schema = z.array(z.string().uuid()).max(200).default([]);
-    else if (field.type === "relation")
+    else if (field.type === "assets") {
+      const assets = z.array(z.string().uuid()).max(200);
+      schema = field.required ? assets.min(1) : assets.default([]);
+    } else if (field.type === "relation")
       schema = field.required
         ? z.string().uuid()
         : z.preprocess(
@@ -81,6 +101,10 @@ export function validateEntity(
     throw new AppError(400, `${label}: ${issue.message}`);
   }
   const data = parsed.data as Record<string, any>;
+  if (kind === "inspections") {
+    data.asset_ids = [...new Set(data.asset_ids)];
+    data.asset_id = data.asset_ids[0];
+  }
   if (kind === "assets") data.asset_tag = data.asset_tag || null;
   if (
     ["customers", "customer_contacts"].includes(kind) &&

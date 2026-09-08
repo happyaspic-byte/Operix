@@ -42,6 +42,11 @@ export async function runJobs(today = todayKST()) {
               ),
             ],
           );
+          for (const row of rows)
+            await tx.query(
+              "INSERT INTO inspection_assets(inspection_id,asset_id) VALUES ($1,$2)",
+              [row.id, plan.asset_id],
+            );
           created += rows.length;
           index++;
         }

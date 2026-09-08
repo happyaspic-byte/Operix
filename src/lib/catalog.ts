@@ -373,7 +373,7 @@ export const catalog: Record<string, EntityConfig> = {
       ["status", "진행 상태"],
     ],
     fields: [
-      asset,
+      { key: "asset_ids", label: "대상 자산", type: "assets", required: true },
       { key: "name", label: "점검명", required: true },
       { key: "planned_date", label: "예정일", type: "date", required: true },
       assignee,

@@ -8,6 +8,11 @@ import { workflowFields } from "./workflow";
 import { lockBusiness } from "./transactions";
 const customerJoin =
   " JOIN sites s ON s.id=a.site_id JOIN customers c ON c.id=s.customer_id";
+const assetLinks: Record<string, { table: string; key: string }> = {
+  contracts: { table: "contract_assets", key: "contract_id" },
+  tickets: { table: "ticket_assets", key: "ticket_id" },
+  inspections: { table: "inspection_assets", key: "inspection_id" },
+};
 export function selection(kind: string) {
   switch (kind) {
     case "customer_contacts":
@@ -21,8 +26,15 @@ export function selection(kind: string) {
     case "tickets":
       return "SELECT e.*,c.name customer_name,u.name assignee_name,COALESCE((SELECT jsonb_agg(asset_id) FROM ticket_assets WHERE ticket_id=e.id),'[]') asset_ids FROM tickets e JOIN customers c ON c.id=e.customer_id LEFT JOIN users u ON u.id=e.assignee_id";
     case "maintenance_plans":
-    case "inspections":
       return `SELECT e.*,a.name asset_name,c.name customer_name,u.name assignee_name FROM ${kind} e JOIN assets a ON a.id=e.asset_id${customerJoin} LEFT JOIN users u ON u.id=e.assignee_id`;
+    case "inspections":
+      // Include the representative target for old imports/direct inserts too.
+      return `SELECT e.*,c.id customer_id,c.name customer_name,u.name assignee_name,targets.asset_ids,targets.assets,targets.asset_name FROM inspections e JOIN assets a ON a.id=e.asset_id${customerJoin} LEFT JOIN users u ON u.id=e.assignee_id CROSS JOIN LATERAL (
+        SELECT jsonb_agg(target.id ORDER BY (target.id=e.asset_id) DESC,target.name,target.id) asset_ids,
+          jsonb_agg(jsonb_build_object('id',target.id,'name',target.name,'asset_tag',target.asset_tag) ORDER BY (target.id=e.asset_id) DESC,target.name,target.id) assets,
+          string_agg(concat_ws(' · ',target.name,nullif(target.asset_tag,'')),', ' ORDER BY (target.id=e.asset_id) DESC,target.name,target.id) asset_name
+        FROM (SELECT e.asset_id UNION SELECT ia.asset_id FROM inspection_assets ia WHERE ia.inspection_id=e.id) linked JOIN assets target ON target.id=linked.asset_id
+      ) targets`;
     default:
       return `SELECT e.* FROM ${kind} e`;
   }
@@ -47,6 +59,18 @@ export async function listRecords(
         : `e.name ILIKE $${params.length}`,
     );
   }
+  if (kind === "inspections") {
+    if (query.get("asset_id")) {
+      params.push(query.get("asset_id"));
+      where.push(
+        `(e.asset_id=$${params.length} OR EXISTS (SELECT 1 FROM inspection_assets ia WHERE ia.inspection_id=e.id AND ia.asset_id=$${params.length}))`,
+      );
+    }
+    if (query.get("customer_id")) {
+      params.push(query.get("customer_id"));
+      where.push(`c.id=$${params.length}`);
+    }
+  }
   for (const key of [
     "asset_id",
     "customer_id",
@@ -57,7 +81,11 @@ export async function listRecords(
     "renewal",
     "severity",
   ])
-    if (query.get(key) && catalog[kind].fields.some((f) => f.key === key)) {
+    if (
+      query.get(key) &&
+      !(kind === "inspections" && ["asset_id", "customer_id"].includes(key)) &&
+      catalog[kind].fields.some((f) => f.key === key)
+    ) {
       params.push(query.get(key));
       where.push(`e.${key}=$${params.length}`);
     }
@@ -147,6 +175,27 @@ async function validateRelations(
   data: Row,
   previous?: Row,
 ) {
+  let customerId = data.customer_id;
+  if (kind === "inspections") {
+    const [target] = await tx.query(
+      "SELECT s.customer_id FROM assets a JOIN sites s ON s.id=a.site_id WHERE a.id=$1",
+      [data.asset_id],
+    );
+    if (!target)
+      throw new AppError(400, "대상 자산: 사용 가능한 자료를 선택해 주세요.");
+    customerId = target.customer_id;
+    if (previous) {
+      const [owner] = await tx.query(
+        "SELECT s.customer_id FROM assets a JOIN sites s ON s.id=a.site_id WHERE a.id=$1",
+        [previous.asset_id],
+      );
+      if (owner.customer_id !== customerId)
+        throw new AppError(
+          409,
+          "기존 점검의 고객사는 변경할 수 없습니다. 새 점검을 등록해 주세요.",
+        );
+    }
+  }
   for (const f of catalog[kind].fields.filter((f) => f.type === "relation")) {
     if (!data[f.key]) continue;
     const [ref] = await tx.query(`SELECT * FROM ${f.entity} WHERE id=$1`, [
@@ -167,20 +216,22 @@ async function validateRelations(
           " WHERE a.id=$1",
         [assetId],
       );
-      if (!a || a.id !== data.customer_id)
+      if (!a || a.id !== customerId)
         throw new AppError(400, "선택한 자산이 해당 고객사의 자산이 아닙니다.");
       if (
         [a.asset_status, a.site_status, a.customer_status].includes("archived")
       ) {
-        const join = kind === "contracts" ? "contract_assets" : "ticket_assets",
-          key = kind === "contracts" ? "contract_id" : "ticket_id";
+        const { table: join, key } = assetLinks[kind];
         const retained = previous
           ? await tx.query(
               `SELECT asset_id FROM ${join} WHERE ${key}=$1 AND asset_id=$2`,
               [previous.id, assetId],
             )
           : [];
-        if (!retained.length)
+        if (
+          !retained.length &&
+          !(kind === "inspections" && previous?.asset_id === assetId)
+        )
           throw new AppError(400, "보관된 자산을 새로 연결할 수 없습니다.");
       }
     }
@@ -224,6 +275,19 @@ export async function saveRecord(
           "다른 사용자가 수정했습니다. 새로고침 후 다시 확인해 주세요.",
         );
     }
+    if (kind === "inspections" && previous) {
+      // A legacy client cannot see secondary targets, so only replace its
+      // representative and retain the remaining links in the same transaction.
+      if (!Object.hasOwn(raw, "asset_ids")) {
+        const existing = await tx.query(
+          "SELECT asset_id FROM inspection_assets WHERE inspection_id=$1 AND asset_id<>$2 ORDER BY asset_id",
+          [previous.id, previous.asset_id],
+        );
+        data.asset_ids = [
+          ...new Set([data.asset_id, ...existing.map((a) => a.asset_id)]),
+        ];
+      }
+    }
     if (
       user.role === "engineer" &&
       ["tickets", "inspections", "maintenance_plans"].includes(kind)
@@ -248,13 +312,13 @@ export async function saveRecord(
       );
       if (old.customer_id !== target.customer_id) {
         const links = await tx.query(
-          "SELECT asset_id FROM contract_assets WHERE asset_id=$1 UNION SELECT asset_id FROM ticket_assets WHERE asset_id=$1",
+          "SELECT asset_id FROM contract_assets WHERE asset_id=$1 UNION SELECT asset_id FROM ticket_assets WHERE asset_id=$1 UNION SELECT asset_id FROM inspection_assets WHERE asset_id=$1 UNION SELECT asset_id FROM inspections WHERE asset_id=$1",
           [id],
         );
         if (links.length)
           throw new AppError(
             409,
-            "계약·작업에 연결된 자산은 고객사를 변경할 수 없습니다.",
+            "계약·점검·작업에 연결된 자산은 고객사를 변경할 수 없습니다.",
           );
       }
     }
@@ -393,8 +457,7 @@ export async function saveRecord(
         ],
       );
     if (assetIds) {
-      const join = kind === "contracts" ? "contract_assets" : "ticket_assets",
-        key = kind === "contracts" ? "contract_id" : "ticket_id";
+      const { table: join, key } = assetLinks[kind];
       await tx.query(`DELETE FROM ${join} WHERE ${key}=$1`, [recordId]);
       for (const assetId of new Set(assetIds))
         await tx.query(`INSERT INTO ${join}(${key},asset_id) VALUES ($1,$2)`, [
@@ -427,7 +490,7 @@ export async function saveRecord(
         [recordId],
       );
       await tx.query(
-        `UPDATE inspections SET status='cancelled',follow_up=concat_ws(E'\n',nullif(follow_up,''),'상위 자료 보관으로 예정 회차 취소'),version=version+1,updated_at=now() WHERE asset_id IN (${assetScope}) AND status='scheduled'`,
+        `UPDATE inspections SET status='cancelled',follow_up=concat_ws(E'\n',nullif(follow_up,''),'상위 자료 보관으로 예정 회차 취소'),version=version+1,updated_at=now() WHERE (asset_id IN (${assetScope}) OR EXISTS (SELECT 1 FROM inspection_assets ia WHERE ia.inspection_id=inspections.id AND ia.asset_id IN (${assetScope}))) AND status='scheduled'`,
         [recordId],
       );
     }
@@ -437,7 +500,7 @@ export async function saveRecord(
         [kind, recordId],
       );
     await audit(tx, user.id, id ? "update" : "create", kind, recordId, {
-      fields: keys,
+      fields: assetIds ? [...keys, "asset_ids"] : keys,
       version_before: previous?.version ?? null,
       version_after: previous ? previous.version + 1 : 1,
     });
@@ -471,7 +534,7 @@ export async function lookups(query = new URLSearchParams(), user?: User) {
     sites:
       "SELECT s.id,s.name,s.customer_id,c.name customer_name,CASE WHEN s.status='archived' OR c.status='archived' THEN 'archived' ELSE 'active' END status FROM sites s JOIN customers c ON c.id=s.customer_id WHERE (s.status='active' AND c.status='active' AND (s.name ILIKE $1 OR c.name ILIKE $1)) OR s.id=ANY($2::text[])",
     assets:
-      "SELECT a.id,a.name,a.asset_tag,a.site_id,s.customer_id,CASE WHEN a.status='archived' OR s.status='archived' OR c.status='archived' THEN 'archived' ELSE a.status END status FROM assets a JOIN sites s ON s.id=a.site_id JOIN customers c ON c.id=s.customer_id WHERE (a.status<>'archived' AND s.status='active' AND c.status='active' AND (a.name ILIKE $1 OR a.asset_tag ILIKE $1 OR c.name ILIKE $1)) OR a.id=ANY($2::text[])",
+      "SELECT a.id,a.name,a.asset_tag,a.site_id,s.name site_name,s.customer_id,c.name customer_name,CASE WHEN a.status='archived' OR s.status='archived' OR c.status='archived' THEN 'archived' ELSE a.status END status FROM assets a JOIN sites s ON s.id=a.site_id JOIN customers c ON c.id=s.customer_id WHERE (a.status<>'archived' AND s.status='active' AND c.status='active' AND (a.name ILIKE $1 OR a.asset_tag ILIKE $1 OR c.name ILIKE $1 OR s.name ILIKE $1)) OR a.id=ANY($2::text[])",
     contracts:
       "SELECT c.id,c.name,c.customer_id,c.status FROM contracts c WHERE c.privacy_erased_at IS NULL AND ((c.status='active' AND c.name ILIKE $1) OR c.id=ANY($2::text[]))",
     users:
@@ -480,9 +543,10 @@ export async function lookups(query = new URLSearchParams(), user?: User) {
   const result: Record<string, Row[]> = {};
   for (const [key, sql] of Object.entries(queries)) {
     if (query.get("entity") && query.get("entity") !== key) continue;
+    const customerId = key === "assets" ? query.get("customer_id") : null;
     result[key] = await db.query(
-      `SELECT * FROM (${sql}) candidates ORDER BY (id=ANY($2::text[])) DESC,name,id LIMIT 100`,
-      ["%" + q + "%", selected[key]],
+      `SELECT * FROM (${sql}) candidates${customerId ? " WHERE customer_id=$3" : ""} ORDER BY (id=ANY($2::text[])) DESC,name,id LIMIT 100`,
+      ["%" + q + "%", selected[key], ...(customerId ? [customerId] : [])],
     );
   }
   return result;

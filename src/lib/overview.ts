@@ -2,6 +2,7 @@ import { getDb } from "./db";
 import type { User } from "./auth";
 import { todayKST, addDays } from "./dates";
 import { can, redact } from "./policy";
+import { selection } from "./records";
 export async function overview(user: User) {
   const db = await getDb(),
     today = todayKST();
@@ -19,7 +20,7 @@ export async function overview(user: User) {
         [addDays(today, 90)],
       ),
       db.query(
-        "SELECT i.*,a.name asset_name,c.name customer_name,u.name assignee_name FROM inspections i JOIN assets a ON a.id=i.asset_id JOIN sites s ON s.id=a.site_id JOIN customers c ON c.id=s.customer_id LEFT JOIN users u ON u.id=i.assignee_id WHERE i.status IN ('scheduled','in_progress') ORDER BY i.planned_date LIMIT 5",
+        `${selection("inspections")} WHERE e.status IN ('scheduled','in_progress') ORDER BY e.planned_date,e.id LIMIT 5`,
       ),
       db.query(
         "SELECT t.*,c.name customer_name,u.name assignee_name FROM tickets t JOIN customers c ON c.id=t.customer_id LEFT JOIN users u ON u.id=t.assignee_id WHERE t.status NOT IN ('resolved','closed') ORDER BY CASE t.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END,t.updated_at DESC LIMIT 4",

@@ -91,7 +91,7 @@ export async function createFollowUp(
       {
         customer_id: asset.customer_id,
         name: title,
-        asset_ids: [rec.asset_id],
+        asset_ids: rec.asset_ids,
         description: rec.follow_up,
         assignee_id: user.id,
       },

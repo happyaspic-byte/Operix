@@ -49,17 +49,23 @@ export async function inventory(
       "SELECT * FROM assets WHERE site_id=ANY($1::text[]) ORDER BY id",
       [scope.sites],
     );
-    for (const table of [
-      "components",
-      "vms",
-      "maintenance_plans",
-      "inspections",
-    ])
+    for (const table of ["components", "vms", "maintenance_plans"])
       await collect(
         table,
         `SELECT * FROM ${table} WHERE asset_id=ANY($1::text[]) ORDER BY id`,
         [scope.assets],
       );
+    await collect(
+      "inspections",
+      "SELECT i.* FROM inspections i WHERE i.asset_id=ANY($1::text[]) OR EXISTS (SELECT 1 FROM inspection_assets ia WHERE ia.inspection_id=i.id AND ia.asset_id=ANY($1::text[])) ORDER BY i.id",
+      [scope.assets],
+    );
+    records.push(
+      await db.query(
+        "SELECT inspection_id,asset_id FROM inspection_assets WHERE inspection_id=ANY($1::text[]) ORDER BY inspection_id,asset_id",
+        [scope.inspections],
+      ),
+    );
     for (const table of ["contracts", "tickets", "customer_contacts"])
       await collect(
         table,
@@ -142,7 +148,7 @@ export async function inventory(
       );
     if (h.subject_kind === "customers") {
       const roots = await db.query(
-        "SELECT id FROM customers WHERE id=$1 UNION SELECT id FROM sites WHERE customer_id=$1 UNION SELECT id FROM contracts WHERE customer_id=$1 UNION SELECT id FROM tickets WHERE customer_id=$1 UNION SELECT id FROM customer_contacts WHERE customer_id=$1 UNION SELECT a.id FROM assets a JOIN sites s ON s.id=a.site_id WHERE s.customer_id=$1 UNION SELECT i.id FROM inspections i JOIN assets a ON a.id=i.asset_id JOIN sites s ON s.id=a.site_id WHERE s.customer_id=$1",
+        "SELECT id FROM customers WHERE id=$1 UNION SELECT id FROM sites WHERE customer_id=$1 UNION SELECT id FROM contracts WHERE customer_id=$1 UNION SELECT id FROM tickets WHERE customer_id=$1 UNION SELECT id FROM customer_contacts WHERE customer_id=$1 UNION SELECT a.id FROM assets a JOIN sites s ON s.id=a.site_id WHERE s.customer_id=$1 UNION SELECT i.id FROM inspections i JOIN assets a ON a.id=i.asset_id OR EXISTS (SELECT 1 FROM inspection_assets ia WHERE ia.inspection_id=i.id AND ia.asset_id=a.id) JOIN sites s ON s.id=a.site_id WHERE s.customer_id=$1",
         [h.subject_id],
       );
       if (roots.some((r) => copySources.has(r.id)))

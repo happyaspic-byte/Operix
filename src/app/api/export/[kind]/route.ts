@@ -44,10 +44,17 @@ export async function GET(
       ...config.fields
         .filter(
           (f) =>
-            !["assets", "checklist"].includes(f.type || "") &&
+            f.type !== "checklist" &&
+            (f.type !== "assets" || kind === "inspections") &&
             (!f.permission || can(u.role, f.permission)),
         )
-        .map((f) => [f.key, f.label] as [string, string]),
+        .map(
+          (f) =>
+            [f.type === "assets" ? "asset_name" : f.key, f.label] as [
+              string,
+              string,
+            ],
+        ),
     ];
     const csv = new URL(request.url).searchParams.get("format") === "csv";
     const bytes = csv
