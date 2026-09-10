@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS dependencies
+FROM node:26-bookworm-slim AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -8,12 +8,12 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-FROM node:24-bookworm-slim AS production-dependencies
+FROM node:26-bookworm-slim AS production-dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-FROM node:24-bookworm-slim AS runner
+FROM node:26-bookworm-slim AS runner
 LABEL org.opencontainers.image.source="https://github.com/happyaspic-byte/Operix"
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000
