@@ -63,6 +63,7 @@ test("contracts and tickets search beyond 100 assets and preserve scoped selecti
       name: "Picker " + kind + " " + suffix,
       customer_id: customer.id,
       asset_ids: [],
+      ...(kind === "contracts" ? { term: "perpetual" } : {}),
     });
     await page.goto("/" + kind + "/" + record.id);
     await page.getByRole("button", { name: "수정", exact: true }).click();
@@ -97,16 +98,23 @@ test("contracts and tickets search beyond 100 assets and preserve scoped selecti
     });
     await page.route("**/api/lookups?*", async (route) => {
       const url = new URL(route.request().url());
-      if (url.searchParams.get("q") === "delayed") {
+      if (url.searchParams.get("q") === target.asset_tag) {
         const response = await route.fetch();
         intercepted();
         await held;
         await route.fulfill({ response });
       } else await route.continue();
     });
-    await search.fill("delayed");
+    await search.fill(target.asset_tag);
     await seen;
-    await editor.getByLabel("고객사 검색", { exact: true }).fill(other.name);
+    await editor
+      .getByLabel(
+        kind === "contracts"
+          ? "실제 사용 고객사 후보 검색"
+          : "고객사 후보 검색",
+        { exact: true },
+      )
+      .fill(other.name);
     await editor.locator("#field-customer_id").selectOption(other.id);
     release();
     await expect(editor.getByText("0개 선택", { exact: true })).toBeVisible();
@@ -121,17 +129,20 @@ test("contracts and tickets search beyond 100 assets and preserve scoped selecti
       const current = await (
         await page.request.get("/api/data/assets/" + target.id)
       ).json();
-      const archived = await page.request.put("/api/data/assets/" + target.id, {
-        headers: origin,
-        data: {
-          name: current.name,
-          site_id: current.site_id,
-          product: current.product,
-          asset_tag: current.asset_tag,
-          status: "archived",
-          version: current.version,
+      const archived = await page.request.patch(
+        "/api/data/assets/" + target.id,
+        {
+          headers: origin,
+          data: {
+            name: current.name,
+            site_id: current.site_id,
+            product: current.product,
+            asset_tag: current.asset_tag,
+            status: "archived",
+            version: current.version,
+          },
         },
-      });
+      );
       expect(archived.status(), await archived.text()).toBe(200);
       await page.getByRole("button", { name: "수정", exact: true }).click();
       await expect(

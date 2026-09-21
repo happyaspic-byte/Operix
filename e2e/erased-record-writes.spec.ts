@@ -57,7 +57,7 @@ test("erasure prevents new entries and reports on completed inspections and reso
     exception_rule: "Synthetic test exception",
     version: policy.version,
   });
-  const archived = await page.request.put(
+  const archived = await page.request.patch(
     "/api/data/customers/" + customer.id,
     {
       headers,
