@@ -1,3 +1,5 @@
+import { assertSupportedNodeVersion } from "./runtime-version.mjs";
+assertSupportedNodeVersion();
 const local =
   process.env.OPERIX_EMBEDDED === "1" ||
   process.env.OPERIX_CONTAINER_TEST === "1" ||

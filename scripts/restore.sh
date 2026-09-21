@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 077
 backup_dir="${1:?Usage: CONFIRM_RESTORE=YES BACKUP_AGE_IDENTITY=/path/to/key bash scripts/restore.sh /absolute/backup-directory}"
+source "$(dirname "${BASH_SOURCE[0]}")/recovery-lock.sh"
 [[ "${CONFIRM_RESTORE:-}" == YES ]] || { printf 'Set CONFIRM_RESTORE=YES for the intended recovery environment.\n' >&2; exit 1; }
 (cd "$backup_dir" && sha256sum -c SHA256SUMS)
 restore_stage=$(mktemp -d)

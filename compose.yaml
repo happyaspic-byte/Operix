@@ -1,7 +1,10 @@
 name: operix
 x-app: &app
   image: operix:${OPERIX_IMAGE_TAG:-local}
-  build: .
+  build:
+    context: .
+    args:
+      OPERIX_REVISION: ${GITHUB_SHA:-development}
   env_file: .env
   environment:
     DATABASE_URL: postgresql://operix:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/operix

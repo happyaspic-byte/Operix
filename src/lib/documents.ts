@@ -1,3 +1,4 @@
+import { assertRecordWritable } from "./record-state";
 import { createHash, randomBytes } from "node:crypto";
 import {
   mkdir,
@@ -142,8 +143,7 @@ export async function uploadDocument(
         "SELECT id FROM operation_locks WHERE id='uploads' FOR UPDATE",
       );
       const rec = await getRecord(kind, entityId, user, tx);
-      if (rec.privacy_erased_at)
-        throw new AppError(410, "파기된 자료에 첨부할 수 없습니다.");
+      assertRecordWritable(rec);
       if (
         user.role === "engineer" &&
         ["tickets", "inspections"].includes(kind) &&
@@ -311,7 +311,9 @@ export async function classifyDocument(
         "자료가 변경되었습니다. 새로고침 후 다시 시도해 주세요.",
       );
     // Checking under the deletion lock keeps existing evidence read-only in trash.
-    await getRecord(document.entity_kind, document.entity_id, user, tx);
+    assertRecordWritable(
+      await getRecord(document.entity_kind, document.entity_id, user, tx),
+    );
     await tx.query(
       "UPDATE documents SET classification=$2,version=version+1,scan_status=CASE WHEN $4 THEN 'pending' ELSE scan_status END WHERE id=$1 AND version=$3 AND deleted_at IS NULL",
       [id, classification, input.version, input.rescan ?? false],
