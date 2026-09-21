@@ -12,3 +12,5 @@ docs/screenshots
 deploy-artifact
 **/__pycache__
 **/*.py[cod]
+
+.operix-recovery.lock

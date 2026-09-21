@@ -1,3 +1,5 @@
+import { assertSupportedNodeVersion } from "./runtime-version.mjs";
+assertSupportedNodeVersion();
 import { setTimeout as delay } from "node:timers/promises";
 import { runJobs } from "../src/lib/jobs.ts";
 import { getDb } from "../src/lib/db.ts";

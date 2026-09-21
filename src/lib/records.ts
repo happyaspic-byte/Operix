@@ -1,3 +1,4 @@
+import { assertRecordWritable } from "./record-state";
 import { getDb, type Database, type Row } from "./db";
 import { catalog } from "./catalog";
 import { audit, type User } from "./auth";
@@ -390,8 +391,7 @@ export async function saveRecord(
       data.assignee_id = user.id;
     }
     await validateRelations(tx, kind, data, previous);
-    if (previous?.privacy_erased_at)
-      throw new AppError(410, "파기된 자료는 다시 수정할 수 없습니다.");
+    if (previous) assertRecordWritable(previous);
     if (kind === "assets" && previous && previous.site_id !== data.site_id) {
       const [old] = await tx.query(
         "SELECT customer_id FROM sites WHERE id=$1",
@@ -419,13 +419,13 @@ export async function saveRecord(
       previous.customer_id !== data.customer_id
     ) {
       const children = await tx.query(
-        "SELECT id FROM assets WHERE site_id=$1 LIMIT 1",
+        "SELECT id FROM assets WHERE site_id=$1 UNION ALL SELECT id FROM customer_contacts WHERE site_id=$1 LIMIT 1",
         [id],
       );
       if (children.length)
         throw new AppError(
           409,
-          "자산이 있는 사업장의 고객사는 변경할 수 없습니다.",
+          "자산이나 담당자가 연결된 사업장의 고객사는 변경할 수 없습니다.",
         );
     }
     if (

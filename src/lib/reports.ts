@@ -1,3 +1,4 @@
+import { assertRecordWritable } from "./record-state";
 import { z } from "zod";
 import { getDb, type Database } from "./db";
 import { audit, type User } from "./auth";
@@ -60,6 +61,7 @@ export async function createReport(user: User, input: unknown) {
   return db.transaction(async (tx) => {
     await lockBusiness(tx);
     const record = await getRecord(b.entity_kind, b.entity_id, user, tx);
+    assertRecordWritable(record);
     if (!["completed", "resolved", "closed"].includes(record.status))
       throw new AppError(
         400,

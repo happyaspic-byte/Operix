@@ -8,17 +8,12 @@
         "POSTGRES_DB": "operix",
         "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}"
       },
-      "volumes": [
-        "database:/var/lib/postgresql/data"
-      ],
+      "volumes": ["database:/var/lib/postgresql/data"],
       "restart": "unless-stopped",
       "mem_limit": "1g",
       "cpu_shares": 512,
       "healthcheck": {
-        "test": [
-          "CMD-SHELL",
-          "pg_isready -U operix -d operix"
-        ],
+        "test": ["CMD-SHELL", "pg_isready -U operix -d operix"],
         "interval": "10s",
         "timeout": "5s",
         "retries": 12
@@ -33,25 +28,16 @@
     },
     "scanner": {
       "image": "clamav/clamav@sha256:b25d9199257ae7ef45e0cc4c7eaa60ce7e5447796f0090d5ff311d1a30980cc3",
-      "entrypoint": [
-        "/bin/sh",
-        "-c"
-      ],
+      "entrypoint": ["/bin/sh", "-c"],
       "command": [
         "#!/bin/sh\nset -eu\nscanner_config=/etc/clamav/clamd.conf\n# Preserve upstream defaults and database updates; override only bounded scan policy.\ntest -f \"$$scanner_config\"\nfor scanner_key in AlertEncrypted AlertExceedsMax StreamMaxLength MaxScanSize MaxFileSize MaxFiles MaxRecursion MaxThreads MaxQueue MaxScanTime; do\n  sed -i \"/^$${scanner_key}[[:space:]]/d\" \"$$scanner_config\"\ndone\ncat >> \"$$scanner_config\" <<'CONF'\nAlertEncrypted yes\nAlertExceedsMax yes\nStreamMaxLength 21M\nMaxScanSize 64M\nMaxFileSize 21M\nMaxFiles 2000\nMaxRecursion 8\nMaxThreads 4\nMaxQueue 8\nMaxScanTime 15000\nCONF\nexec /init \"$$@\"\n"
       ],
-      "volumes": [
-        "scanner:/var/lib/clamav"
-      ],
+      "volumes": ["scanner:/var/lib/clamav"],
       "restart": "unless-stopped",
       "mem_limit": "4g",
       "cpu_shares": 128,
       "healthcheck": {
-        "test": [
-          "CMD",
-          "clamdscan",
-          "--ping=1"
-        ],
+        "test": ["CMD", "clamdscan", "--ping=1"],
         "interval": "15s",
         "timeout": "10s",
         "start_period": "180s",
@@ -86,6 +72,8 @@
         "CLAMD_PORT": "3310",
         "WORKER_REQUIRED": "1",
         "BACKUP_REQUIRED": "${BACKUP_REQUIRED:-0}",
+        "BACKUP_REMOTE_REQUIRED": "${BACKUP_REMOTE_REQUIRED:-0}",
+        "BACKUP_MAX_AGE_HOURS": "${BACKUP_MAX_AGE_HOURS:-26}",
         "UPLOAD_STORAGE_LIMIT_MB": "${UPLOAD_STORAGE_LIMIT_MB:-10240}",
         "NEXT_TELEMETRY_DISABLED": "1"
       },
@@ -139,6 +127,8 @@
         "CLAMD_PORT": "3310",
         "WORKER_REQUIRED": "1",
         "BACKUP_REQUIRED": "${BACKUP_REQUIRED:-0}",
+        "BACKUP_REMOTE_REQUIRED": "${BACKUP_REMOTE_REQUIRED:-0}",
+        "BACKUP_MAX_AGE_HOURS": "${BACKUP_MAX_AGE_HOURS:-26}",
         "UPLOAD_STORAGE_LIMIT_MB": "${UPLOAD_STORAGE_LIMIT_MB:-10240}",
         "NEXT_TELEMETRY_DISABLED": "1"
       },
@@ -157,15 +147,11 @@
       "restart": "unless-stopped",
       "mem_limit": "2g",
       "cpu_shares": 512,
-      "ports": [
-        "127.0.0.1:${OPERIX_PORT:-9010}:3000"
-      ],
+      "ports": ["127.0.0.1:${OPERIX_PORT:-9010}:3000"],
       "networks": {
         "default": {},
         "proxy": {
-          "aliases": [
-            "operix-web"
-          ]
+          "aliases": ["operix-web"]
         }
       },
       "depends_on": {
@@ -210,6 +196,8 @@
         "CLAMD_PORT": "3310",
         "WORKER_REQUIRED": "1",
         "BACKUP_REQUIRED": "${BACKUP_REQUIRED:-0}",
+        "BACKUP_REMOTE_REQUIRED": "${BACKUP_REMOTE_REQUIRED:-0}",
+        "BACKUP_MAX_AGE_HOURS": "${BACKUP_MAX_AGE_HOURS:-26}",
         "UPLOAD_STORAGE_LIMIT_MB": "${UPLOAD_STORAGE_LIMIT_MB:-10240}",
         "NEXT_TELEMETRY_DISABLED": "1"
       },
@@ -225,12 +213,7 @@
           "max-file": "3"
         }
       },
-      "command": [
-        "node",
-        "--import",
-        "tsx",
-        "scripts/worker.ts"
-      ],
+      "command": ["node", "--import", "tsx", "scripts/worker.ts"],
       "restart": "unless-stopped",
       "mem_limit": "1g",
       "cpu_shares": 256,
@@ -248,9 +231,7 @@
       "ports": [
         "${OPERIX_BIND_IP:?Set OPERIX_BIND_IP}:${OPERIX_HTTPS_PORT:-9010}:443"
       ],
-      "volumes": [
-        "https:/etc/nginx/conf.d:ro"
-      ],
+      "volumes": ["https:/etc/nginx/conf.d:ro"],
       "depends_on": {
         "web": {
           "condition": "service_healthy"
@@ -269,10 +250,7 @@
     },
     "backup": {
       "image": "postgres@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0",
-      "entrypoint": [
-        "/bin/sh",
-        "-ec"
-      ],
+      "entrypoint": ["/bin/sh", "-ec"],
       "command": [
         "set -eu\numask 077\ncase \"$$DEPLOYMENT_ID\" in ''|*[!a-zA-Z0-9_-]*) echo \"Invalid deployment ID\" >&2; exit 1;; esac\n[ \"$${#DEPLOYMENT_ID}\" -le 128 ]\nmkdir -p /backups\nchmod 700 /backups\nfile=\"/backups/$$DEPLOYMENT_ID.dump\"\nif [ -f \"$$file\" ]; then\n  pg_restore --list \"$$file\" > /dev/null\n  echo \"Existing deployment backup verified\"\n  exit 0\nfi\ntrap 'rm -f -- \"$$file.part\"' EXIT\npg_dump --format=custom --file=\"$$file.part\"\npg_restore --list \"$$file.part\" > /dev/null\nmv -- \"$$file.part\" \"$$file\"\necho \"Pre-migration database backup completed\"\nls -1t /backups/*.dump | sed -n '8,$$p' | while IFS= read -r old; do rm -f -- \"$$old\"; done\n"
       ],
@@ -283,9 +261,7 @@
         "PGPASSWORD": "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}",
         "DEPLOYMENT_ID": "__DEPLOYMENT_ID__"
       },
-      "volumes": [
-        "backups:/backups"
-      ],
+      "volumes": ["backups:/backups"],
       "depends_on": {
         "db": {
           "condition": "service_healthy"
@@ -293,9 +269,7 @@
       },
       "restart": "no",
       "read_only": true,
-      "cap_drop": [
-        "ALL"
-      ],
+      "cap_drop": ["ALL"],
       "mem_limit": "512m",
       "cpu_shares": 128,
       "logging": {
@@ -308,9 +282,7 @@
     },
     "deployment-check": {
       "image": "postgres@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0",
-      "command": [
-        "true"
-      ],
+      "command": ["true"],
       "depends_on": {
         "web": {
           "condition": "service_healthy"
@@ -327,9 +299,7 @@
       },
       "restart": "no",
       "read_only": true,
-      "cap_drop": [
-        "ALL"
-      ],
+      "cap_drop": ["ALL"],
       "mem_limit": "64m",
       "cpu_shares": 128,
       "logging": {

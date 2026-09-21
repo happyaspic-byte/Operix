@@ -39,6 +39,7 @@ jobs:
       SEED_DEMO: "1"
       UPLOAD_DIR: storage/uploads
       NEXT_TELEMETRY_DISABLED: "1"
+      OPERIX_REVISION: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,7 +54,10 @@ jobs:
       - name: Explicit type and static checks
         run: npm run typecheck && npm run lint
       - name: Domain and security tests against PostgreSQL
-        run: npm test
+        run: |
+          mkdir -p test-results
+          set -o pipefail
+          npm test | tee test-results/domain-tests.txt
       - name: NAS deployment contract tests
         run: python3 -m unittest discover -s tests -p 'test_nas_*.py'
       - run: npm run db:migrate
@@ -79,6 +83,11 @@ jobs:
           diff -r storage test-results/recovery/files
           rm test-results/recovery/database.dump test-results/recovery/storage.tar.gz
           rm -rf test-results/recovery/files
+      - name: Record verification revision
+        if: always()
+        run: |
+          mkdir -p test-results
+          node -e 'require("fs").writeFileSync("test-results/revision.json",JSON.stringify({revision:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,run_attempt:process.env.GITHUB_RUN_ATTEMPT},null,2))'
       - name: Upload verification evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -87,6 +96,9 @@ jobs:
           include-hidden-files: true
           path: |
             test-results/e2e-results.json
+            test-results/domain-tests.txt
+            test-results/revision.json
+            .data/contention-performance.json
             test-results/accessibility.json
             test-results/screenshots
             test-results/ui-improve
@@ -122,6 +134,7 @@ jobs:
         run: docker compose exec -T scanner clamdscan --ping=120:2
       - name: Container health and authentication
         run: |
+          node scripts/verify-deployment.mjs http://localhost:3000 "$GITHUB_SHA" --allow-http
           curl --fail http://localhost:3000/api/health
           curl --fail -c /tmp/operix-cookies -H 'Origin: http://localhost:3000' -H 'Content-Type: application/json' --data '{"email":"admin@operix.test","password":"CI-only-container-password-123!"}' http://localhost:3000/api/auth/login
           curl --fail -b /tmp/operix-cookies http://localhost:3000/api/data/assets
