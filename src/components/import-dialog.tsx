@@ -18,7 +18,8 @@ export function ImportDialog({
     [preview, setPreview] = useState<any>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [mapping, setMapping] = useState<Record<string, string>>({});
+    [mapping, setMapping] = useState<Record<string, string>>({}),
+    [sites, setSites] = useState<Record<string, string>>({});
   function close() {
     if (busy) return;
     if (file && !window.confirm("가져오기 내용을 버리고 닫을까요?")) return;
@@ -33,6 +34,8 @@ export function ImportDialog({
       form.set("file", file);
       form.set("kind", kind);
       form.set("mapping", JSON.stringify(mapping));
+      form.set("sites", JSON.stringify(sites));
+      if (preview) setPreview({ ...preview, valid: false });
       setPreview(await api("/api/import", { method: "POST", body: form }));
     } catch (e) {
       setError((e as Error).message);
@@ -98,6 +101,8 @@ export function ImportDialog({
             onChange={(e) => {
               setFile(e.target.files?.[0] || null);
               setPreview(null);
+              setMapping({});
+              setSites({});
             }}
           />
         </label>
@@ -128,6 +133,41 @@ export function ImportDialog({
                 ),
               )}
             </div>
+            {!!preview.site_groups?.length && (
+              <div className="import-mapping">
+                <p>
+                  ALM 고객사·위치별 사업장 연결. 자동 일치하지 않으면 기존
+                  사업장을 직접 선택하고 다시 검증하세요. 조직을 새로 만들지
+                  않습니다.
+                </p>
+                {preview.site_groups.map((group: any) => (
+                  <label key={group.key}>
+                    {group.customer} / {group.location}
+                    <select
+                      aria-label={
+                        "사업장 연결 " + group.customer + " / " + group.location
+                      }
+                      value={sites[group.key] || ""}
+                      disabled={busy}
+                      onChange={(e) => {
+                        const next = { ...sites };
+                        if (e.target.value) next[group.key] = e.target.value;
+                        else delete next[group.key];
+                        setSites(next);
+                        setPreview({ ...preview, valid: false });
+                      }}
+                    >
+                      <option value="">고객사·사업장명 자동 일치</option>
+                      {preview.sites.map((site: any) => (
+                        <option key={site.id} value={site.id}>
+                          {site.customer_name} / {site.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            )}
             <div className="import-summary">
               검토 대상 {preview.rows.length}행 · 오류{" "}
               {preview.rows.filter((r: any) => r.action === "error").length}행
@@ -155,6 +195,9 @@ export function ImportDialog({
                             : "오류"}
                       </td>
                       <td>
+                        {row.warnings?.map((warning: string) => (
+                          <p key={warning}>{warning}</p>
+                        ))}
                         {row.error || (
                           <details>
                             <summary>

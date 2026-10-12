@@ -43,12 +43,18 @@ export async function previewImport(
   kind: ImportKind,
   file: File,
   supplied: unknown = {},
+  suppliedSites: unknown = {},
 ) {
   requirePermission(user.role, catalog[kind].permission);
-  const mapping = {
-    ...importMapping(kind),
-    ...parseInput(z.record(z.string().max(100), z.string().max(100)), supplied),
-  };
+  const explicitMapping = parseInput(
+    z.record(z.string().max(100), z.string().max(100)),
+    supplied,
+  );
+  const siteMapping = parseInput(
+    z.record(z.string().max(1000), z.string().uuid()),
+    suppliedSites,
+  );
+  const mapping = { ...importMapping(kind), ...explicitMapping };
   const scanned = await scanBytes(Buffer.from(await file.arrayBuffer()));
   if (scanned.status !== "clean")
     throw new AppError(
@@ -58,7 +64,57 @@ export async function previewImport(
   const rows = await parseSheet(file),
     db = await getDb(),
     result: Row[] = [],
-    seen = new Set<string>();
+    seen = new Set<string>(),
+    seenSerials = new Set<string>();
+  const headers = Object.keys(rows[0] || {});
+  const alm =
+    kind === "assets" &&
+    [
+      "display_name",
+      "serial_number",
+      "u_asset_type",
+      "account",
+      "location.u_city_state_county_country_combined",
+    ].every((header) => headers.includes(header));
+  if (alm) {
+    const aliases: Record<string, string> = {
+      name: "display_name",
+      serial: "serial_number",
+      product: "u_asset_type",
+      customer_name: "account",
+      site_name: "location.u_city_state_county_country_combined",
+    };
+    for (const [key, header] of Object.entries(aliases))
+      if (
+        !Object.hasOwn(explicitMapping, key) &&
+        !headers.includes(mapping[key])
+      )
+        mapping[key] = header;
+  }
+  const siteGroups = alm
+    ? [
+        ...new Map(
+          rows.map((row) => {
+            const customer = row.account || "",
+              location =
+                row["location.u_city_state_county_country_combined"] || "";
+            const key = JSON.stringify([customer, location]);
+            return [key, { key, customer, location }];
+          }),
+        ).values(),
+      ]
+    : [];
+  if (
+    Object.keys(siteMapping).some(
+      (key) => !siteGroups.some((group) => group.key === key),
+    )
+  )
+    throw new AppError(400, "파일에 없는 고객사·위치의 사업장 연결입니다.");
+  const availableSites = alm
+    ? await db.query(
+        "SELECT s.id,s.name,c.name AS customer_name FROM sites s JOIN customers c ON c.id=s.customer_id WHERE s.status='active' AND c.status='active' ORDER BY c.name,s.name",
+      )
+    : [];
   async function one(sql: string, values: unknown[], label: string) {
     const rows = await db.query(sql, values);
     if (rows.length !== 1)
@@ -71,7 +127,15 @@ export async function previewImport(
   }
   for (let i = 0; i < rows.length; i++) {
     try {
-      const input: Row = {};
+      const input: Row = {},
+        warnings: string[] = [];
+      const source = rows[i];
+      const groupKey = alm
+        ? JSON.stringify([
+            source.account || "",
+            source["location.u_city_state_county_country_combined"] || "",
+          ])
+        : "";
       for (const field of catalog[kind].fields) {
         const header = mapping[field.key] || field.key;
         if (Object.hasOwn(rows[i], header)) {
@@ -82,6 +146,53 @@ export async function previewImport(
             continue;
           input[field.key] = value;
         }
+      }
+      const fallbackTag = alm && !input.asset_tag;
+      if (alm) {
+        if (!input.asset_tag && !input.serial)
+          throw new AppError(
+            400,
+            "ALM 시리얼 또는 명시적 자산 ID가 필요합니다.",
+          );
+        if (input.serial) {
+          const serialKey = String(input.serial).toLowerCase();
+          if (seenSerials.has(serialKey))
+            throw new AppError(400, "파일 내 시리얼이 중복됩니다.");
+          seenSerials.add(serialKey);
+        }
+      }
+      if (fallbackTag) {
+        if (!input.serial)
+          throw new AppError(
+            400,
+            "ALM 시리얼 또는 명시적 자산 ID가 필요합니다.",
+          );
+        input.asset_tag = input.serial;
+      }
+      if (alm && mapping.product === "u_asset_type") {
+        const products: Record<string, string> = {
+          "everRun Enterprise": "everRun",
+          ztCEdge: "ztC Edge",
+          windows: "Server",
+        };
+        const converted = products[input.product];
+        if (converted) {
+          warnings.push(
+            `원본 자산 유형 ${input.product} → 제품 ${converted} (원본은 메모에 보존)`,
+          );
+          input.product = converted;
+        }
+      }
+      if (alm && siteMapping[groupKey]) {
+        if (!availableSites.some((site) => site.id === siteMapping[groupKey]))
+          throw new AppError(
+            400,
+            "활성 고객사에 속한 활성 사업장을 선택해 주세요.",
+          );
+        input.site_id = siteMapping[groupKey];
+        warnings.push(
+          "원본 고객사·위치를 선택한 사업장에 연결합니다. 원본은 메모에 보존됩니다.",
+        );
       }
       const customerName = rows[i][mapping.customer_name],
         siteName = rows[i][mapping.site_name];
@@ -153,6 +264,52 @@ export async function previewImport(
           "SELECT * FROM contracts WHERE customer_id=$1 AND lower(name)=lower($2) AND kind=$3",
           [input.customer_id, input.name, input.kind],
         );
+      if (alm && input.serial) {
+        const serialMatches = await db.query(
+          "SELECT * FROM assets WHERE lower(serial)=lower($1)",
+          [input.serial],
+        );
+        if (
+          serialMatches.length > 1 ||
+          (matches.length &&
+            serialMatches.some((row) => row.id !== matches[0].id))
+        )
+          throw new AppError(
+            400,
+            "기존 시리얼이 중복되거나 자산 ID와 충돌합니다. 개별 자료를 확인해 주세요.",
+          );
+        if (!fallbackTag && serialMatches.length && !matches.length)
+          throw new AppError(
+            400,
+            "기존 시리얼의 자산 ID와 명시적 자산 ID가 다릅니다.",
+          );
+        if (fallbackTag && serialMatches.length) {
+          if (matches.length && matches[0].id !== serialMatches[0].id)
+            throw new AppError(
+              400,
+              "시리얼과 자산 ID가 서로 다른 자료를 가리킵니다.",
+            );
+          matches = serialMatches;
+          input.asset_tag = matches[0].asset_tag || input.serial;
+        }
+
+        if (
+          matches.length &&
+          matches[0].serial &&
+          String(matches[0].serial).toLowerCase() !==
+            String(input.serial).toLowerCase()
+        )
+          throw new AppError(
+            400,
+            "기존 자산 ID의 시리얼과 원본 시리얼이 다릅니다.",
+          );
+      }
+      if (alm && matches.length && matches[0].site_id !== input.site_id)
+        throw new AppError(
+          400,
+          "기존 자산의 사업장은 ALM 가져오기로 변경할 수 없습니다.",
+        );
+      if (alm && matches.length && !input.serial) delete input.serial;
       if (matches.length > 1)
         throw new AppError(
           400,
@@ -198,6 +355,29 @@ export async function previewImport(
           );
         input.asset_ids = ids;
       }
+      if (alm) {
+        if (!existing && !Object.hasOwn(input, "status"))
+          input.status = "unknown";
+        const labels: Record<string, string> = {
+          u_system_name: "ALM 시스템명",
+          account: "ALM 원본 고객사",
+          "location.u_city_state_county_country_combined": "ALM 원본 위치",
+          u_asset_type: "ALM 원본 자산 유형",
+          u_entitlement: "ALM 지원 권한",
+          u_service_expiration: "ALM 서비스 만료일",
+        };
+        const notes = String(input.notes ?? previous.notes ?? "").split("\n");
+        for (const [header, label] of Object.entries(labels)) {
+          if (!source[header]) continue;
+          const value = source[header]
+            .replaceAll("\\", "\\\\")
+            .replaceAll("\r", "\\r")
+            .replaceAll("\n", "\\n");
+          const line = `${label}: ${value}`;
+          if (!notes.includes(line)) notes.push(line);
+        }
+        input.notes = notes.filter(Boolean).join("\n");
+      }
       const data = validateEntity(kind, { ...previous, ...input });
       for (const f of catalog[kind].fields)
         if (f.permission && !can(user.role, f.permission)) {
@@ -222,6 +402,8 @@ export async function previewImport(
         id: existing?.id,
         version: existing?.version,
         name: data.name,
+        warnings,
+        alm_identity: alm,
         data,
         changes,
       });
@@ -245,8 +427,12 @@ export async function previewImport(
   return {
     batch_id: id,
     headers: Object.keys(rows[0] || {}),
-    mapping: importMapping(kind),
-    rows: result.map(({ data: _data, ...rest }) => rest),
+    mapping,
+    site_groups: siteGroups,
+    sites: availableSites,
+    rows: result.map(
+      ({ data: _data, alm_identity: _identity, ...rest }) => rest,
+    ),
     valid: result.every((r) => r.action !== "error"),
   };
 }
@@ -268,7 +454,23 @@ export async function commitImport(user: User, id: string) {
       batch.payload.some((r: Row) => r.action === "error")
     )
       throw new AppError(400, "오류를 수정하고 다시 검증해 주세요.");
-    for (const row of batch.payload)
+    for (const row of batch.payload) {
+      if (row.alm_identity) {
+        const matches = await tx.query(
+          "SELECT id,site_id FROM assets WHERE lower(asset_tag)=lower($1) OR ($2<>'' AND lower(serial)=lower($2))",
+          [row.data.asset_tag, row.data.serial || ""],
+        );
+        if (
+          matches.some(
+            (match) =>
+              match.id !== row.id || match.site_id !== row.data.site_id,
+          )
+        )
+          throw new AppError(
+            409,
+            "ALM 식별 정보가 변경됐거나 시리얼이 중복됩니다. 다시 검증해 주세요.",
+          );
+      }
       await saveRecord(
         batch.entity_kind,
         user,
@@ -276,6 +478,7 @@ export async function commitImport(user: User, id: string) {
         row.id,
         tx,
       );
+    }
     const summary = {
       count: batch.payload.length,
       created: batch.payload.filter((r: Row) => r.action === "create").length,

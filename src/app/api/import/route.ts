@@ -84,13 +84,16 @@ export async function POST(request: Request) {
         kind = parseInput(z.enum(importKinds), form.get("kind") || "assets");
       if (!(file instanceof File))
         throw new AppError(400, "파일을 선택해 주세요.");
-      let mapping;
+      let mapping, sites;
       try {
         mapping = JSON.parse(String(form.get("mapping") || "{}"));
+        sites = JSON.parse(String(form.get("sites") || "{}"));
       } catch {
         throw new AppError(400, "열 연결 형식을 확인해 주세요.");
       }
-      return NextResponse.json(await previewImport(u, kind, file, mapping));
+      return NextResponse.json(
+        await previewImport(u, kind, file, mapping, sites),
+      );
     });
   } catch (e) {
     return failure(e);

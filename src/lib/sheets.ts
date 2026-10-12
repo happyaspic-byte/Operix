@@ -52,7 +52,9 @@ export async function parseSheet(
     }
     sheet = workbook.worksheets[0];
   } else if (file.name.toLowerCase().endsWith(".csv"))
-    sheet = await workbook.csv.read(Readable.from(bytes));
+    sheet = await workbook.csv.read(Readable.from(bytes), {
+      map: (value: string) => value,
+    });
   else throw new AppError(400, "XLSX 또는 CSV 파일을 선택해 주세요.");
   if (!sheet || sheet.rowCount < 2)
     throw new AppError(400, "머리글과 데이터 행이 필요합니다.");

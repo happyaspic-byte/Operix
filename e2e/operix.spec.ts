@@ -516,6 +516,49 @@ test("XLSX export and CSV import validate, commit once and preserve records", as
   ).json();
   expect(q.total).toBeGreaterThan(0);
 });
+
+test("ALM preview resolves external organization through explicit existing site", async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto("/assets");
+  await page.getByRole("button", { name: "가져오기", exact: true }).click();
+  const name = "ALM UI synthetic " + Date.now();
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "renamed.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(
+      "display_name,u_system_name,account,serial_number,u_asset_type,location.u_city_state_county_country_combined,u_entitlement,u_service_expiration\n" +
+        `${name},Synthetic system,External synthetic customer,UI-${Date.now()},windows,External synthetic location,No Service,2027-01-31`,
+    ),
+  });
+  await page.getByRole("button", { name: "미리보기 검증" }).click();
+  const commit = page.getByRole("button", { name: "확인한 내용 반영" });
+  await expect(commit).toBeDisabled();
+  const site = page.getByLabel(
+    "사업장 연결 External synthetic customer / External synthetic location",
+  );
+  await expect(site).toBeVisible();
+  const option = await site.locator("option").nth(1).getAttribute("value");
+  expect(option).toBeTruthy();
+  await site.selectOption(option!);
+  await expect(commit).toBeDisabled();
+  await page.getByRole("button", { name: "미리보기 검증" }).click();
+  await expect(
+    page.getByText(
+      "원본 자산 유형 windows → 제품 Server (원본은 메모에 보존)",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(commit).toBeEnabled();
+  await commit.click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const result = await page.request.get(
+    "/api/data/assets?q=" + encodeURIComponent(name),
+  );
+  const data = await result.json();
+  expect(data.total).toBe(1);
+});
 test("logout invalidates session for direct API and page refresh", async ({
   page,
 }) => {

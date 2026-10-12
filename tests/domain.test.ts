@@ -1418,3 +1418,447 @@ test("C10: standard XLSX asset template accepts blank optional selections", asyn
   );
   assert.equal(rows[0].lifecycle_status, "operating");
 });
+
+test("ALM headers import synthetic asset without Korean mapping", async () => {
+  const { c, s } = await fresh();
+  const csv =
+    "display_name,u_system_name,account,serial_number,u_asset_type,location.u_city_state_county_country_combined,u_entitlement,u_service_expiration\n" +
+    [
+      "Synthetic ALM asset",
+      "Synthetic system",
+      c.name,
+      "ALM-" + crypto.randomUUID(),
+      "everRun Enterprise",
+      s.name,
+      "everRun Support",
+      "2027-01-31",
+    ].join(",");
+  const p = await previewImport(user, "assets", new File([csv], "renamed.csv"));
+  assert.equal(p.valid, true, JSON.stringify(p.rows));
+  await commitImport(user, p.batch_id);
+  const [saved] = await db.query(
+    "SELECT * FROM assets WHERE site_id=$1 AND name=$2",
+    [s.id, "Synthetic ALM asset"],
+  );
+  assert.equal(saved.product, "everRun");
+  assert.match(saved.notes, /Synthetic system/);
+  assert.match(saved.notes, /2027-01-31/);
+  await saveRecord(
+    "assets",
+    user,
+    {
+      site_id: saved.site_id,
+      name: saved.name,
+      asset_tag: saved.asset_tag,
+      serial: saved.serial,
+      product: saved.product,
+      notes: saved.notes,
+      version: saved.version,
+      status: "warning",
+      protection: "HA",
+      model: "Kept model",
+      owner_id: user.id,
+    },
+    saved.id,
+  );
+  const again = await previewImport(
+    user,
+    "assets",
+    new File([csv], "again.csv"),
+  );
+  assert.equal(again.valid, true, JSON.stringify(again.rows));
+  assert.equal(again.rows[0].action, "update");
+  await commitImport(user, again.batch_id);
+  const [updated] = await db.query("SELECT * FROM assets WHERE id=$1", [
+    saved.id,
+  ]);
+  assert.equal(updated.notes, saved.notes);
+  assert.equal(updated.status, "warning");
+  assert.equal(updated.protection, "HA");
+  assert.equal(updated.model, "Kept model");
+  assert.equal(updated.owner_id, user.id);
+});
+
+const almHeaders =
+  "display_name,u_system_name,account,serial_number,u_asset_type,location.u_city_state_county_country_combined,u_entitlement,u_service_expiration";
+function almFile(values: string[][], extraHeaders = "") {
+  return new File(
+    [
+      almHeaders +
+        extraHeaders +
+        "\n" +
+        values.map((row) => row.join(",")).join("\n"),
+    ],
+    "synthetic.csv",
+  );
+}
+
+test("ALM products preserve windows conversion and reject unknown types", async () => {
+  const { c, s } = await fresh();
+  for (const [source, expected] of [
+    ["ztCEdge", "ztC Edge"],
+    ["windows", "Server"],
+  ]) {
+    const p = await previewImport(
+      user,
+      "assets",
+      almFile([
+        [
+          source,
+          "",
+          c.name,
+          crypto.randomUUID(),
+          source,
+          s.name,
+          "No Service",
+          "",
+        ],
+      ]),
+    );
+    assert.equal(p.valid, true, JSON.stringify(p.rows));
+    assert.ok(
+      p.rows[0].warnings.some(
+        (w: string) => w.includes(source) && w.includes(expected),
+      ),
+    );
+    await commitImport(user, p.batch_id);
+    const [saved] = await db.query(
+      "SELECT * FROM assets WHERE id=(SELECT id FROM assets WHERE name=$1 AND site_id=$2)",
+      [source, s.id],
+    );
+    assert.equal(saved.product, expected);
+    assert.match(saved.notes, new RegExp(source));
+    assert.equal(saved.status, "unknown");
+  }
+  const bad = await previewImport(
+    user,
+    "assets",
+    almFile([
+      [
+        "Bad product",
+        "",
+        c.name,
+        crypto.randomUUID(),
+        "Unrecognized",
+        s.name,
+        "",
+        "",
+      ],
+    ]),
+  );
+  assert.equal(bad.valid, false);
+});
+
+test("ALM unresolved organizations require explicit active existing site resolution", async () => {
+  const { s } = await fresh();
+  const file = almFile([
+    [
+      "Unresolved asset",
+      "",
+      "External customer",
+      crypto.randomUUID(),
+      "everRun Enterprise",
+      "External location",
+      "Perpetual Service",
+      "",
+    ],
+  ]);
+  const p = await previewImport(user, "assets", file);
+  assert.equal(p.valid, false);
+  assert.equal(p.site_groups.length, 1);
+  const key = p.site_groups[0].key;
+  const resolved = await previewImport(
+    user,
+    "assets",
+    file,
+    {},
+    { [key]: s.id },
+  );
+  assert.equal(resolved.valid, true, JSON.stringify(resolved.rows));
+  await commitImport(user, resolved.batch_id);
+  const [saved] = await db.query(
+    "SELECT * FROM assets WHERE name='Unresolved asset' AND site_id=$1",
+    [s.id],
+  );
+  assert.match(saved.notes, /External customer/);
+  assert.match(saved.notes, /External location/);
+  await saveRecord(
+    "sites",
+    user,
+    {
+      customer_id: s.customer_id,
+      name: s.name,
+      version: s.version,
+      status: "archived",
+    },
+    s.id,
+  );
+  const archived = await previewImport(
+    user,
+    "assets",
+    file,
+    {},
+    { [key]: s.id },
+  );
+  assert.equal(archived.valid, false);
+  const invalid = await previewImport(
+    user,
+    "assets",
+    file,
+    {},
+    { [key]: crypto.randomUUID() },
+  );
+  assert.equal(invalid.valid, false);
+  await assert.rejects(
+    () => previewImport(viewer, "assets", file, {}, { [key]: s.id }),
+    /권한/,
+  );
+});
+
+test("ALM explicit columns and mappings override aliases", async () => {
+  const { c, s } = await fresh();
+  const tag = "EXPLICIT-" + crypto.randomUUID();
+  const file = almFile(
+    [
+      [
+        "Alias name",
+        "",
+        c.name,
+        "ALIAS-" + crypto.randomUUID(),
+        "everRun Enterprise",
+        s.name,
+        "",
+        "",
+        "Korean name",
+        tag,
+        "Network",
+        "Custom name",
+      ],
+    ],
+    ",자산명,자산 ID,제품,Custom",
+  );
+  const p = await previewImport(user, "assets", file);
+  assert.equal(p.valid, true, JSON.stringify(p.rows));
+  assert.equal(p.rows[0].name, "Korean name");
+  await commitImport(user, p.batch_id);
+  const [saved] = await db.query("SELECT * FROM assets WHERE asset_tag=$1", [
+    tag,
+  ]);
+  assert.equal(saved.product, "Network");
+  const custom = await previewImport(user, "assets", file, { name: "Custom" });
+  assert.equal(custom.rows[0].name, "Custom name");
+});
+
+test("ALM identifiers reject duplicates missing identity and serial conflicts", async () => {
+  const { c, s } = await fresh();
+  const serial = "SER-" + crypto.randomUUID();
+  const row = ["Identity asset", "", c.name, serial, "ztCEdge", s.name, "", ""];
+  const duplicate = await previewImport(
+    user,
+    "assets",
+    almFile([row, [...row]]),
+  );
+  assert.equal(duplicate.valid, false);
+  await assert.rejects(() => commitImport(user, duplicate.batch_id), /오류/);
+  const missing = await previewImport(
+    user,
+    "assets",
+    almFile([[...row.slice(0, 3), "", ...row.slice(4)]]),
+  );
+  assert.equal(missing.valid, false);
+  const existing = await saveRecord("assets", user, {
+    site_id: s.id,
+    name: "Existing serial",
+    asset_tag: "OLD-" + crypto.randomUUID(),
+    serial,
+    product: "ztC Edge",
+  });
+  const matched = await previewImport(user, "assets", almFile([row]));
+  assert.equal(matched.valid, true, JSON.stringify(matched.rows));
+  assert.equal(matched.rows[0].id, existing.id);
+  await commitImport(user, matched.batch_id);
+  const [kept] = await db.query("SELECT * FROM assets WHERE id=$1", [
+    existing.id,
+  ]);
+  assert.equal(kept.asset_tag, existing.asset_tag);
+  const { s: other } = await fresh();
+  const move = await previewImport(
+    user,
+    "assets",
+    almFile([row]),
+    {},
+    { [JSON.stringify([c.name, s.name])]: other.id },
+  );
+  assert.equal(move.valid, false);
+  await saveRecord("assets", user, {
+    site_id: s.id,
+    name: "Second serial",
+    serial,
+    product: "Server",
+  });
+  const ambiguous = await previewImport(user, "assets", almFile([row]));
+  assert.equal(ambiguous.valid, false);
+});
+
+test("ALM explicit IDs cannot hide repeated serials or bypass missing identity", async () => {
+  const { c, s } = await fresh();
+  const row = [
+    "Explicit identity",
+    "",
+    c.name,
+    "0000123",
+    "everRun Enterprise",
+    s.name,
+    "",
+    "2027-01-31",
+    "TAG-A-" + crypto.randomUUID(),
+  ];
+  const repeated = await previewImport(
+    user,
+    "assets",
+    almFile(
+      [row, [...row.slice(0, 8), "TAG-B-" + crypto.randomUUID()]],
+      ",자산 ID",
+    ),
+  );
+  assert.equal(repeated.valid, false);
+  const missing = await previewImport(
+    user,
+    "assets",
+    almFile([[...row.slice(0, 3), "", ...row.slice(4, 8), ""]], ",자산 ID"),
+  );
+  assert.equal(missing.valid, false);
+});
+
+test("CSV text parsing preserves leading-zero identity and original calendar dates", async () => {
+  const rows = await parseSheet(
+    new File(
+      ["serial_number,u_service_expiration\n0000123,2027-01-31"],
+      "text.csv",
+    ),
+  );
+  assert.deepEqual(rows, [
+    { serial_number: "0000123", u_service_expiration: "2027-01-31" },
+  ]);
+});
+
+test("ALM ambiguous customer names stay unresolved until explicit site selection", async () => {
+  const { c, s } = await fresh();
+  const duplicateCustomer = await saveRecord("customers", user, {
+    name: c.name.toUpperCase(),
+  });
+  await saveRecord("sites", user, {
+    customer_id: duplicateCustomer.id,
+    name: s.name,
+  });
+  const file = almFile([
+    [
+      "Ambiguous organization",
+      "",
+      c.name,
+      crypto.randomUUID(),
+      "ztCEdge",
+      s.name,
+      "",
+      "",
+    ],
+  ]);
+  const p = await previewImport(user, "assets", file);
+  assert.equal(p.valid, false);
+  const resolved = await previewImport(
+    user,
+    "assets",
+    file,
+    {},
+    { [p.site_groups[0].key]: s.id },
+  );
+  assert.equal(resolved.valid, true, JSON.stringify(resolved.rows));
+});
+
+test("ALM commit rejects serial collisions introduced after preview atomically", async () => {
+  const { c, s } = await fresh();
+  const serial = "RACE-" + crypto.randomUUID();
+  const file = almFile([
+    ["Race asset", "", c.name, serial, "ztCEdge", s.name, "", ""],
+  ]);
+  const p = await previewImport(user, "assets", file);
+  assert.equal(p.valid, true);
+  await saveRecord("assets", user, {
+    site_id: s.id,
+    name: "Concurrent asset",
+    serial,
+    asset_tag: "OTHER-" + crypto.randomUUID(),
+    product: "Server",
+  });
+  await assert.rejects(() => commitImport(user, p.batch_id), /시리얼|식별/);
+  const [count] = await db.query(
+    "SELECT count(*)::int AS count FROM assets WHERE lower(serial)=lower($1)",
+    [serial],
+  );
+  assert.equal(count.count, 1);
+});
+
+test("ALM multiline source notes stay unchanged on reimport", async () => {
+  const { c, s } = await fresh();
+  const file = almFile([
+    [
+      "Multiline asset",
+      '"Line one\r\nLine two"',
+      c.name,
+      crypto.randomUUID(),
+      "ztCEdge",
+      s.name,
+      '"Support\nTwo"',
+      "",
+    ],
+  ]);
+  const p = await previewImport(user, "assets", file);
+  assert.equal(p.valid, true);
+  await commitImport(user, p.batch_id);
+  const [before] = await db.query(
+    "SELECT notes FROM assets WHERE site_id=$1 AND name='Multiline asset'",
+    [s.id],
+  );
+  const q = await previewImport(user, "assets", file);
+  await commitImport(user, q.batch_id);
+  const [after] = await db.query(
+    "SELECT notes FROM assets WHERE site_id=$1 AND name='Multiline asset'",
+    [s.id],
+  );
+  assert.equal(after.notes, before.notes);
+  assert.match(after.notes, /Line one/);
+  assert.match(after.notes, /Line two/);
+});
+
+test("ALM explicit tag with blank serial preserves identity and cannot move site", async () => {
+  const { c, s } = await fresh(),
+    { s: other } = await fresh();
+  const tag = "BLANK-" + crypto.randomUUID(),
+    serial = "KEEP-" + crypto.randomUUID();
+  const saved = await saveRecord("assets", user, {
+    site_id: s.id,
+    name: "Blank serial asset",
+    asset_tag: tag,
+    serial,
+    product: "Server",
+  });
+  const file = almFile(
+    [["Blank serial asset", "", c.name, "", "windows", s.name, "", "", tag]],
+    ",자산 ID",
+  );
+  const p = await previewImport(user, "assets", file);
+  assert.equal(p.valid, true);
+  await commitImport(user, p.batch_id);
+  const [kept] = await db.query("SELECT serial FROM assets WHERE id=$1", [
+    saved.id,
+  ]);
+  assert.equal(kept.serial, serial);
+  const moved = await previewImport(
+    user,
+    "assets",
+    file,
+    {},
+    { [JSON.stringify([c.name, s.name])]: other.id },
+  );
+  assert.equal(moved.valid, false);
+});
