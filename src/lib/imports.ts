@@ -209,20 +209,32 @@ export async function previewImport(
             "고객사명",
           )
         ).id;
-      if (kind === "assets" && !input.site_id && customerName && siteName)
-        input.site_id = (
-          await one(
-            "SELECT s.id FROM sites s JOIN customers c ON c.id=s.customer_id WHERE lower(c.name)=lower($1) AND lower(s.name)=lower($2) AND s.status='active' AND c.status='active'",
-            [customerName, siteName],
-            "고객사·사업장명",
-          )
-        ).id;
-      if (!input.name) throw new AppError(400, "이름은 필수입니다.");
-      if (kind === "assets" && (!input.site_id || !input.product))
-        throw new AppError(
-          400,
-          "사업장 ID 또는 고객사·사업장명과 제품을 입력해 주세요.",
+      if (kind === "assets" && !input.site_id && (customerName || siteName)) {
+        const sites =
+          customerName && siteName
+            ? await db.query(
+                "SELECT s.id FROM sites s JOIN customers c ON c.id=s.customer_id WHERE lower(c.name)=lower($1) AND lower(s.name)=lower($2) AND s.status='active' AND c.status='active'",
+                [customerName, siteName],
+              )
+            : [];
+        if (sites.length === 1) input.site_id = sites[0].id;
+        else if (!alm)
+          throw new AppError(
+            400,
+            "고객사·사업장명: 일치하는 자료가 없거나 여러 개입니다. 내부 ID로 구분해 주세요.",
+          );
+      }
+      if (kind === "assets" && input.site_id)
+        await one(
+          "SELECT s.id FROM sites s JOIN customers c ON c.id=s.customer_id WHERE s.id=$1 AND s.status='active' AND c.status='active'",
+          [input.site_id],
+          "사업장",
         );
+      if (!input.name) throw new AppError(400, "이름은 필수입니다.");
+      if (kind === "assets" && !input.product)
+        throw new AppError(400, "제품을 입력해 주세요.");
+      if (kind === "assets" && !input.site_id && !input.asset_tag)
+        throw new AppError(400, "사업장 미지정 자산은 자산 ID가 필요합니다.");
       if (["sites", "contracts"].includes(kind) && !input.customer_id)
         throw new AppError(400, "고객사 ID 또는 고객사명을 입력해 주세요.");
       const identity =
@@ -304,7 +316,18 @@ export async function previewImport(
             "기존 자산 ID의 시리얼과 원본 시리얼이 다릅니다.",
           );
       }
-      if (alm && matches.length && matches[0].site_id !== input.site_id)
+      if (kind === "assets") {
+        input.site_id = input.site_id || matches[0]?.site_id || null;
+        if (!input.site_id)
+          warnings.push(
+            "사업장 미지정 · 등록 후 연결 가능. 원본 고객사·위치는 실제 소속 연결이 아닙니다.",
+          );
+      }
+      if (
+        alm &&
+        matches.length &&
+        (matches[0].site_id ?? null) !== input.site_id
+      )
         throw new AppError(
           400,
           "기존 자산의 사업장은 ALM 가져오기로 변경할 수 없습니다.",
@@ -463,7 +486,8 @@ export async function commitImport(user: User, id: string) {
         if (
           matches.some(
             (match) =>
-              match.id !== row.id || match.site_id !== row.data.site_id,
+              match.id !== row.id ||
+              (match.site_id ?? null) !== (row.data.site_id ?? null),
           )
         )
           throw new AppError(

@@ -21,7 +21,7 @@ export function selection(kind: string) {
     case "sites":
       return "SELECT e.*,c.name customer_name FROM sites e JOIN customers c ON c.id=e.customer_id";
     case "assets":
-      return "SELECT e.*,s.name site_name,c.name customer_name,c.id customer_id,u.name owner_name FROM assets e JOIN sites s ON s.id=e.site_id JOIN customers c ON c.id=s.customer_id LEFT JOIN users u ON u.id=e.owner_id";
+      return "SELECT e.*,s.name site_name,c.name customer_name,c.id customer_id,u.name owner_name FROM assets e LEFT JOIN sites s ON s.id=e.site_id LEFT JOIN customers c ON c.id=s.customer_id LEFT JOIN users u ON u.id=e.owner_id";
     case "contracts":
       return "SELECT e.*,c.name customer_name,u.name owner_name,COALESCE((SELECT jsonb_agg(asset_id) FROM contract_assets WHERE contract_id=e.id),'[]') asset_ids FROM contracts e JOIN customers c ON c.id=e.customer_id LEFT JOIN users u ON u.id=e.owner_id";
     case "tickets":
@@ -262,6 +262,16 @@ async function validateRelations(
   previous?: Row,
 ) {
   let customerId = data.customer_id;
+  if (kind === "maintenance_plans") {
+    const [asset] = await tx.query("SELECT site_id FROM assets WHERE id=$1", [
+      data.asset_id,
+    ]);
+    if (asset && !asset.site_id)
+      throw new AppError(
+        400,
+        "사업장을 연결한 후 반복 점검 계획을 등록해 주세요.",
+      );
+  }
   if (kind === "inspections") {
     const [target] = await tx.query(
       "SELECT s.customer_id FROM assets a JOIN sites s ON s.id=a.site_id WHERE a.id=$1",
@@ -393,6 +403,11 @@ export async function saveRecord(
     if (previous?.privacy_erased_at)
       throw new AppError(410, "파기된 자료는 다시 수정할 수 없습니다.");
     if (kind === "assets" && previous && previous.site_id !== data.site_id) {
+      if (previous.site_id && !data.site_id)
+        throw new AppError(
+          400,
+          "기존 자산의 사업장 연결은 해제할 수 없습니다.",
+        );
       const [old] = await tx.query(
         "SELECT customer_id FROM sites WHERE id=$1",
         [previous.site_id],
@@ -401,7 +416,7 @@ export async function saveRecord(
         "SELECT customer_id FROM sites WHERE id=$1",
         [data.site_id],
       );
-      if (old.customer_id !== target.customer_id) {
+      if (old && old.customer_id !== target?.customer_id) {
         const links = await tx.query(
           "SELECT asset_id FROM contract_assets WHERE asset_id=$1 UNION SELECT asset_id FROM ticket_assets WHERE asset_id=$1 UNION SELECT asset_id FROM inspection_assets WHERE asset_id=$1 UNION SELECT asset_id FROM inspections WHERE asset_id=$1",
           [id],
@@ -469,7 +484,7 @@ export async function saveRecord(
         "vms",
       ].includes(kind)
         ? await tx.query(
-            "SELECT a.status asset_status,s.status site_status,c.status customer_status FROM assets a JOIN sites s ON s.id=a.site_id JOIN customers c ON c.id=s.customer_id WHERE a.id=$1",
+            "SELECT a.status asset_status,s.status site_status,c.status customer_status FROM assets a LEFT JOIN sites s ON s.id=a.site_id LEFT JOIN customers c ON c.id=s.customer_id WHERE a.id=$1",
             [data.asset_id],
           )
         : kind === "assets"
@@ -631,6 +646,10 @@ export async function lookups(query = new URLSearchParams(), user?: User) {
     users:
       "SELECT id,name,role,CASE WHEN active THEN 'active' ELSE 'archived' END status FROM users WHERE privacy_erased_at IS NULL AND ((active=true AND name ILIKE $1) OR id=ANY($2::text[]))",
   };
+  // Only asset-local editors can select assets without a customer/site link.
+  if (currentKind === "components" || currentKind === "vms")
+    queries.assets +=
+      " UNION ALL SELECT a.id,a.name,a.asset_tag,a.site_id,NULL site_name,NULL customer_id,NULL customer_name,a.status FROM assets a WHERE a.site_id IS NULL AND ((a.status<>'archived' AND (a.name ILIKE $1 OR a.asset_tag ILIKE $1)) OR a.id=ANY($2::text[]))";
   const result: Record<string, Row[]> = {};
   for (const [key, sql] of Object.entries(queries)) {
     if (query.get("entity") && query.get("entity") !== key) continue;

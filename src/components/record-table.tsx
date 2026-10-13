@@ -115,7 +115,12 @@ export function RecordTable({
                     </span>
                   ) : key === "customer_name" ? (
                     <>
-                      <span>{row[key] || "—"}</span>
+                      <span>
+                        {row[key] ||
+                          (kind === "assets" && !row.site_id
+                            ? "사업장 미지정"
+                            : "—")}
+                      </span>
                       {row.site_name && <small>{row.site_name}</small>}
                     </>
                   ) : (
