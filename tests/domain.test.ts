@@ -1549,7 +1549,7 @@ test("ALM products preserve windows conversion and reject unknown types", async 
   assert.equal(bad.valid, false);
 });
 
-test("ALM unresolved organizations require explicit active existing site resolution", async () => {
+test("ALM unresolved organizations allow unassigned assets but explicit sites must be active", async () => {
   const { s } = await fresh();
   const file = almFile([
     [
@@ -1564,7 +1564,12 @@ test("ALM unresolved organizations require explicit active existing site resolut
     ],
   ]);
   const p = await previewImport(user, "assets", file);
-  assert.equal(p.valid, false);
+  assert.equal(p.valid, true, JSON.stringify(p.rows));
+  assert.ok(
+    p.rows[0].warnings.some((warning: string) =>
+      warning.includes("사업장 미지정"),
+    ),
+  );
   assert.equal(p.site_groups.length, 1);
   const key = p.site_groups[0].key;
   const resolved = await previewImport(
@@ -1742,7 +1747,7 @@ test("CSV text parsing preserves leading-zero identity and original calendar dat
   ]);
 });
 
-test("ALM ambiguous customer names stay unresolved until explicit site selection", async () => {
+test("ALM ambiguous customer names allow unassigned assets without choosing an organization", async () => {
   const { c, s } = await fresh();
   const duplicateCustomer = await saveRecord("customers", user, {
     name: c.name.toUpperCase(),
@@ -1764,7 +1769,12 @@ test("ALM ambiguous customer names stay unresolved until explicit site selection
     ],
   ]);
   const p = await previewImport(user, "assets", file);
-  assert.equal(p.valid, false);
+  assert.equal(p.valid, true, JSON.stringify(p.rows));
+  assert.ok(
+    p.rows[0].warnings.some((warning: string) =>
+      warning.includes("사업장 미지정"),
+    ),
+  );
   const resolved = await previewImport(
     user,
     "assets",

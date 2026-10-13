@@ -145,7 +145,6 @@ export const catalog: Record<string, EntityConfig> = {
         label: "사업장",
         type: "relation",
         entity: "sites",
-        required: true,
       },
       { key: "name", label: "자산명", required: true },
       { key: "asset_tag", label: "제조사 자산 ID" },

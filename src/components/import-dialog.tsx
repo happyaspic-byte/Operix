@@ -136,9 +136,11 @@ export function ImportDialog({
             {!!preview.site_groups?.length && (
               <div className="import-mapping">
                 <p>
-                  ALM 고객사·위치별 사업장 연결. 자동 일치하지 않으면 기존
-                  사업장을 직접 선택하고 다시 검증하세요. 조직을 새로 만들지
-                  않습니다.
+                  ALM 고객사·위치별 사업장 연결은 선택 사항입니다. 자동 일치하지
+                  않는 신규 자산은 사업장 미지정으로 등록하고 나중에 편집에서
+                  연결할 수 있습니다. 기존 자산의 연결은 유지되며 가져오기로
+                  변경할 수 없습니다. 원본 고객사·위치는 메모로만 보존하며
+                  조직을 새로 만들지 않습니다.
                 </p>
                 {preview.site_groups.map((group: any) => (
                   <label key={group.key}>
@@ -157,7 +159,7 @@ export function ImportDialog({
                         setPreview({ ...preview, valid: false });
                       }}
                     >
-                      <option value="">고객사·사업장명 자동 일치</option>
+                      <option value="">자동 일치 / 미지정으로 등록</option>
                       {preview.sites.map((site: any) => (
                         <option key={site.id} value={site.id}>
                           {site.customer_name} / {site.name}

@@ -406,9 +406,12 @@ export function RecordEditor({
             required={f.required}
             onChange={(e) => update(f.key, e.target.value)}
           >
-            {(!f.required || f.type === "relation") && (
-              <option value="">선택해 주세요</option>
-            )}
+            {(!f.required || f.type === "relation") &&
+              !(
+                kind === "assets" &&
+                f.key === "site_id" &&
+                initial?.site_id
+              ) && <option value="">선택해 주세요</option>}
             {choices.map(([v, l]) => (
               <option value={v} key={v}>
                 {l}

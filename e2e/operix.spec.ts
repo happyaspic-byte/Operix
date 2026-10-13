@@ -517,47 +517,131 @@ test("XLSX export and CSV import validate, commit once and preserve records", as
   expect(q.total).toBeGreaterThan(0);
 });
 
-test("ALM preview resolves external organization through explicit existing site", async ({
+test("ALM preview imports unassigned assets then assigns a site in the editor", async ({
   page,
 }) => {
   await login(page);
-  await page.goto("/assets");
-  await page.getByRole("button", { name: "가져오기", exact: true }).click();
-  const name = "ALM UI synthetic " + Date.now();
-  await page.locator('input[type="file"]').setInputFiles({
-    name: "renamed.csv",
+  const suffix = Date.now();
+  const name = "ALM UI synthetic " + suffix;
+  const file = {
+    name: "synthetic.csv",
     mimeType: "text/csv",
     buffer: Buffer.from(
       "display_name,u_system_name,account,serial_number,u_asset_type,location.u_city_state_county_country_combined,u_entitlement,u_service_expiration\n" +
-        `${name},Synthetic system,External synthetic customer,UI-${Date.now()},windows,External synthetic location,No Service,2027-01-31`,
+        `${name},Synthetic system,External synthetic customer,UI-${suffix},windows,External synthetic location,No Service,2027-01-31`,
     ),
-  });
+  };
+  await page.goto("/assets");
+  await page.getByRole("button", { name: "가져오기", exact: true }).click();
+  await page.locator('input[type="file"]').setInputFiles(file);
   await page.getByRole("button", { name: "미리보기 검증" }).click();
   const commit = page.getByRole("button", { name: "확인한 내용 반영" });
-  await expect(commit).toBeDisabled();
+  await expect(
+    page.getByText(/사업장 미지정 · 등록 후 연결 가능/),
+  ).toBeVisible();
+  await expect(commit).toBeEnabled();
+  // Changing a mapping still invalidates preview; restore unassigned before import.
   const site = page.getByLabel(
     "사업장 연결 External synthetic customer / External synthetic location",
   );
-  await expect(site).toBeVisible();
-  const option = await site.locator("option").nth(1).getAttribute("value");
-  expect(option).toBeTruthy();
-  await site.selectOption(option!);
+  const siteId = await site.locator("option").nth(1).getAttribute("value");
+  expect(siteId).toBeTruthy();
+  await site.selectOption(siteId!);
   await expect(commit).toBeDisabled();
+  await site.selectOption("");
   await page.getByRole("button", { name: "미리보기 검증" }).click();
-  await expect(
-    page.getByText(
-      "원본 자산 유형 windows → 제품 Server (원본은 메모에 보존)",
-      { exact: true },
-    ),
-  ).toBeVisible();
   await expect(commit).toBeEnabled();
   await commit.click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
-  const result = await page.request.get(
-    "/api/data/assets?q=" + encodeURIComponent(name),
+  const result = await (
+    await page.request.get("/api/data/assets?q=" + encodeURIComponent(name))
+  ).json();
+  expect(result.total).toBe(1);
+  const record = result.rows[0];
+  expect(record.site_id).toBeNull();
+  await page.goto("/assets?q=" + encodeURIComponent(name));
+  const row = page.getByRole("row").filter({ hasText: name });
+  await expect(row.getByText("사업장 미지정", { exact: true })).toBeVisible();
+  const exported = await page.request.get(
+    "/api/export/assets?format=csv&q=" + encodeURIComponent(name),
   );
-  const data = await result.json();
-  expect(data.total).toBe(1);
+  expect(exported.status()).toBe(200);
+  expect(await exported.text()).toContain(name);
+  const payload = Buffer.from("Synthetic unassigned asset note.");
+  const upload = await page.request.post("/api/documents", {
+    headers: origin,
+    multipart: {
+      entity_kind: "assets",
+      entity_id: record.id,
+      file: { name: "unassigned.txt", mimeType: "text/plain", buffer: payload },
+    },
+  });
+  expect(upload.status()).toBe(201);
+  const document = await upload.json();
+  const grant = await page.request.post("/api/documents/" + document.id, {
+    headers: origin,
+    data: { reason: "합성 미지정 자산 첨부 검증" },
+  });
+  expect(grant.status()).toBe(200);
+  const download = await page.request.get((await grant.json()).url);
+  expect(await download.body()).toEqual(payload);
+  await page.goto("/assets/" + record.id);
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+  for (const child of [
+    { kind: "components", tab: "구성요소", button: "구성요소 등록" },
+    { kind: "vms", tab: "가상머신", button: "VM 등록" },
+  ]) {
+    await page
+      .getByRole("button", { name: new RegExp(child.tab) })
+      .first()
+      .click();
+    await page.getByRole("button", { name: child.button, exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("대상 자산 후보 검색").fill("UI-" + suffix);
+    await expect(
+      dialog.locator('#field-asset_id option[value="' + record.id + '"]'),
+    ).toHaveCount(1);
+    await dialog.locator("#field-asset_id").selectOption(record.id);
+    await dialog.locator("#field-name").fill(child.kind + " " + suffix);
+    await page.getByRole("button", { name: "저장", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    const children = await (
+      await page.request.get(
+        "/api/data/" +
+          child.kind +
+          "?q=" +
+          encodeURIComponent(child.kind + " " + suffix),
+      )
+    ).json();
+    expect(children.total).toBe(1);
+    expect(children.rows[0].asset_id).toBe(record.id);
+  }
+  await page.getByRole("button", { name: "수정", exact: true }).click();
+  const editorSite = page.getByRole("dialog").locator("#field-site_id");
+  await expect(editorSite).not.toHaveAttribute("required", "");
+  await editorSite.selectOption(siteId!);
+  await page.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.getByRole("button", { name: "수정", exact: true }).click();
+  await expect(
+    page.getByRole("dialog").locator('#field-site_id option[value=""]'),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "취소", exact: true }).click();
+  await page.goto("/assets");
+  await page.getByRole("button", { name: "가져오기", exact: true }).click();
+  await page.locator('input[type="file"]').setInputFiles(file);
+  await page.getByRole("button", { name: "미리보기 검증" }).click();
+  await expect(
+    page.getByRole("button", { name: "확인한 내용 반영" }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "확인한 내용 반영" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const repeated = await (
+    await page.request.get("/api/data/assets?q=" + encodeURIComponent(name))
+  ).json();
+  expect(repeated.total).toBe(1);
+  expect(repeated.rows[0].site_id).toBe(siteId);
+  expect(repeated.rows[0].notes).toBe(record.notes);
 });
 test("logout invalidates session for direct API and page refresh", async ({
   page,
