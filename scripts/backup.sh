@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+source "$(dirname "${BASH_SOURCE[0]}")/recovery-lock.sh"
 backup_root="${1:?Usage: BACKUP_AGE_RECIPIENT=age1... bash scripts/backup.sh /absolute/backup-directory}"
 if [[ -z "${BACKUP_AGE_RECIPIENT:-}" && "${OPERIX_CONTAINER_TEST:-}" != "1" ]]; then
   printf 'Set BACKUP_AGE_RECIPIENT. Production backups must be encrypted.\n' >&2
@@ -13,13 +14,21 @@ mkdir "$backup_dir"
 backup_stage=$(mktemp -d)
 backup_id=$(cat /proc/sys/kernel/random/uuid)
 backup_ok=0
+writers_stopped=0
+running_output=$(docker compose ps --status running --services web worker)
+running_writers=()
+if [[ -n "$running_output" ]]; then mapfile -t running_writers <<< "$running_output"; fi
 cleanup() {
   rm -rf -- "$backup_stage"
   if [[ "$backup_ok" == 0 ]]; then docker compose run --rm --no-deps web node --import tsx scripts/recovery.ts backup-failed "$backup_id" >/dev/null || true; fi
-  docker compose start web worker >/dev/null
+  if [[ "$writers_stopped" == 1 && ${#running_writers[@]} -gt 0 ]]; then
+    docker compose start "${running_writers[@]}" >/dev/null
+  fi
 }
 trap cleanup EXIT
 docker compose run --rm --no-deps web node --import tsx scripts/recovery.ts backup-start "$backup_id" >/dev/null
+# Mark before stop: a partial stop failure still needs to resume original writers.
+writers_stopped=1
 docker compose stop web worker
 # Manifest creation rejects orphan files and inconsistent DB metadata.
 docker compose run --rm --no-deps -T web node --import tsx scripts/recovery.ts manifest > "$backup_stage/manifest.json"
@@ -37,7 +46,8 @@ else
   backup_mode=plain
   tar -czf "$backup_dir/backup.tar.gz" -C "$backup_stage" .
 fi
-(cd "$backup_dir" && sha256sum backup.tar.gz* > SHA256SUMS)
+printf '%s\n' "$backup_id" > "$backup_dir/BACKUP_ID"
+(cd "$backup_dir" && sha256sum backup.tar.gz* BACKUP_ID > SHA256SUMS)
 backup_hash=$(sha256sum "$backup_stage/manifest.json" | cut -d ' ' -f 1)
 docker compose run --rm --no-deps web node --import tsx scripts/recovery.ts backup-complete "$backup_id" "$backup_hash" "$backup_mode" >/dev/null
 backup_ok=1

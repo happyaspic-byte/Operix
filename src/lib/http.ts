@@ -10,6 +10,14 @@ export function failure(error: unknown) {
       { status: error.status },
     );
   const code = (error as { code?: string })?.code;
+  if (code === "55P03")
+    return NextResponse.json(
+      {
+        error: "다른 작업을 처리 중입니다. 잠시 후 다시 시도해 주세요.",
+        request_id: requestId,
+      },
+      { status: 503, headers: { "Retry-After": "5" } },
+    );
   if (code === "23505")
     return NextResponse.json(
       {

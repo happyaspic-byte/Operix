@@ -1,6 +1,6 @@
 FROM node:24-bookworm-slim AS dependencies
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci
 
 FROM dependencies AS build
@@ -10,10 +10,13 @@ RUN npm run build
 
 FROM node:24-bookworm-slim AS production-dependencies
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev
 
 FROM node:24-bookworm-slim AS runner
+ARG OPERIX_REVISION=development
+ENV OPERIX_REVISION=$OPERIX_REVISION
+LABEL org.opencontainers.image.revision=$OPERIX_REVISION
 LABEL org.opencontainers.image.source="https://github.com/happyaspic-byte/Operix"
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000

@@ -130,7 +130,14 @@ try {
       "UPDATE backup_runs SET status='completed',completed_at=now(),manifest_hash=$2,encrypted=$3 WHERE id=$1",
       [key, process.argv[4], process.argv[5] !== "plain"],
     );
-  else if (action === "backup-failed")
+  else if (action === "backup-replicated") {
+    const rows = await db.query(
+      "UPDATE backup_runs SET replicated_at=now() WHERE id=$1 AND status='completed' AND encrypted=true RETURNING id",
+      [key],
+    );
+    if (rows.length !== 1)
+      throw new Error("Completed encrypted backup receipt not found");
+  } else if (action === "backup-failed")
     await db.query(
       "UPDATE backup_runs SET status='failed',error_code='backup_failed' WHERE id=$1",
       [key],
