@@ -24,9 +24,12 @@ export function selection(kind: string) {
     case "assets":
       return "SELECT e.*,s.name site_name,c.name customer_name,c.id customer_id,u.name owner_name FROM assets e LEFT JOIN sites s ON s.id=e.site_id LEFT JOIN customers c ON c.id=s.customer_id LEFT JOIN users u ON u.id=e.owner_id";
     case "contracts":
-      return "SELECT e.*,c.name customer_name,u.name owner_name,COALESCE((SELECT jsonb_agg(asset_id) FROM contract_assets WHERE contract_id=e.id),'[]') asset_ids FROM contracts e JOIN customers c ON c.id=e.customer_id LEFT JOIN users u ON u.id=e.owner_id";
+      return "SELECT e.*,c.name customer_name,u.name owner_name,p.name predecessor_name,COALESCE((SELECT jsonb_agg(asset_id) FROM contract_assets WHERE contract_id=e.id),'[]') asset_ids FROM contracts e JOIN customers c ON c.id=e.customer_id LEFT JOIN users u ON u.id=e.owner_id LEFT JOIN contracts p ON p.id=e.predecessor_id";
     case "tickets":
       return "SELECT e.*,c.name customer_name,u.name assignee_name,COALESCE((SELECT jsonb_agg(asset_id) FROM ticket_assets WHERE ticket_id=e.id),'[]') asset_ids FROM tickets e JOIN customers c ON c.id=e.customer_id LEFT JOIN users u ON u.id=e.assignee_id";
+    case "components":
+    case "vms":
+      return `SELECT e.*,a.name asset_name FROM ${kind} e JOIN assets a ON a.id=e.asset_id`;
     case "maintenance_plans":
       return `SELECT e.*,a.name asset_name,c.name customer_name,u.name assignee_name FROM ${kind} e JOIN assets a ON a.id=e.asset_id${customerJoin} LEFT JOIN users u ON u.id=e.assignee_id`;
     case "inspections":
