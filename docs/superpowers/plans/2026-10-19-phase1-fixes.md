@@ -198,11 +198,11 @@
 
 - [ ] **Step 3:** At the top of `tests/user-organization-privacy.test.ts` set a default `SESSION_SECRET` the way `tests/domain.test.ts` does. Verify with `env -u SESSION_SECRET node --import tsx --test tests/user-organization-privacy.test.ts` → PASS.
 
-- [ ] **Step 4: E2E:** in `e2e/security-http.spec.ts`, while logged in as admin, `GET /constructor`, `/toString` and `/constructor/00000000-0000-4000-8000-000000000000` each respond 404 (not 500). Run `bash …/scratchpad/e2e.sh e2e/security-http.spec.ts`.
+- [ ] **Step 4: E2E (revised 2026-10-19):** `(erp)/loading.tsx` streams every `(erp)` page, so `notFound()` cannot change the HTTP status from 200 (Next's documented streaming contract). Assert the observable outcome instead: in `e2e/security-http.spec.ts`, log in as admin through `page.request`, then for `/constructor`, `/toString` and `/constructor/00000000-0000-4000-8000-000000000000` expect the heading `페이지를 찾을 수 없습니다.` to be visible and the text `정보를 불러오지 못했습니다.` to have count 0. Run `bash …/scratchpad/e2e.sh e2e/security-http.spec.ts`.
 
 - [ ] **Step 5: Verify** the Global Constraints checks.
 
-- [ ] **Step 6: Commit** `fix: retry server errors and 404 unknown entity routes`.
+- [ ] **Step 6: Commit** `fix: retry server errors and 404 unknown entity routes` (Steps 1-3), then `test: show the not-found page for inherited-key entity routes` (Step 4).
 
 ### Task 7: Correct related-record labels on detail pages
 
@@ -223,3 +223,85 @@
 - [ ] **Step 4: Verify** the focused test and the Global Constraints checks.
 
 - [ ] **Step 5: Commit** `fix: show correct names for related records`.
+
+---
+
+## Round 2 (controller review rulings, 2026-10-19)
+
+Tasks 8-11 come from the controller's review of Tasks 1-5 (see the SDD ledger rulings). Global Constraints apply unchanged.
+
+### Task 8: Session time zone through the pool hook
+
+Why: rewriting `DATABASE_URL` breaks a password containing a malformed percent escape (pg-connection-string then `encodeURI`s the whole URL and the server receives `-c TimeZone%3DAsia%2FSeoul`), and pg never sends `statement_timeout: 0`.
+
+**Files:**
+- Modify: `src/lib/db.ts`
+- Modify: `tests/timezone.test.ts`, `tests/migration-connection.test.ts`
+
+**Interfaces:**
+- Removes: `withSessionTimeZone` (no callers may remain).
+- Produces in `src/lib/db.ts`:
+  - `export async function applySessionTimeZone(client: { query: (sql: string) => Promise<unknown> }): Promise<void>` — runs exactly `SET TIME ZONE 'Asia/Seoul'` (built from `DB_TIME_ZONE`).
+  - `export function poolConfig(connectionString: string): PoolConfig` returning exactly `{ connectionString, max: 8, connectionTimeoutMillis: 10000, idleTimeoutMillis: 30000, statement_timeout: 30000, query_timeout: 35000, onConnect: applySessionTimeZone }`; `connectionString` is passed through unchanged. pg-pool 3.14 awaits `onConnect` before handing out a new connection.
+  - `migrationClientConfig(connectionString)` returns exactly `{ connectionString, connectionTimeoutMillis: 10000, lock_timeout: 60000, application_name: "operix-migrate" }`.
+  - `connectForMigrations()` runs `applySessionTimeZone(client)` and then `SET statement_timeout = 0` right after `client.connect()`.
+- `connect()` builds the pool with `new Pool(poolConfig(process.env.DATABASE_URL))` and PGlite calls `applySessionTimeZone(pg)` right after `waitReady`.
+
+- [ ] **Step 1: Update the tests first:**
+  - `applySessionTimeZone` with a recording fake client issues exactly `["SET TIME ZONE 'Asia/Seoul'"]`.
+  - `poolConfig(url)` deep-equals the object above (`onConnect` is `applySessionTimeZone`), and `connectionString` is byte-identical to the input for `postgresql://operix:p%ssw0rd!@db:5432/operix` and for `postgresql://u:p@db:5432/operix?options=-c%20search_path%3Dtest_schema&sslmode=disable`.
+  - `migrationClientConfig(url)` deep-equals the object above, with neither `query_timeout` nor `statement_timeout` keys.
+  - In the stubbed PostgreSQL migration-connection test, the first two statements after connect are `SET TIME ZONE 'Asia/Seoul'` and `SET statement_timeout = 0`.
+  - Delete the `withSessionTimeZone` tests; keep every PGlite session, date, contract and report-number test.
+- [ ] **Step 2: Run to verify failure:** `node --import tsx --test tests/timezone.test.ts tests/migration-connection.test.ts`.
+- [ ] **Step 3: Implement** the interfaces above.
+- [ ] **Step 4: Verify** the focused tests (also with `TZ=UTC`) and the Global Constraints checks.
+- [ ] **Step 5: Commit** `fix: set the database time zone per connection instead of in the URL`.
+
+### Task 9: Seed bootstrap follow-ups
+
+**Files:**
+- Modify: `scripts/seed.ts`, `tests/seed.test.ts`, `docs/DEPLOYMENT.md`
+
+**Interfaces:**
+- Produces: seed behaviour only.
+
+- [ ] **Step 1: Update the tests first:**
+  - With no active admin and an existing non-admin account whose email equals `ADMIN_EMAIL` (run in its own fresh PGlite directory so no other row can collide), the seed exits non-zero with `ADMIN_EMAIL belongs to an existing account that is not an active administrator. Choose another ADMIN_EMAIL.` and creates no admin.
+  - Replace the fixed-id collision test: the bootstrap admin's id is a UUID and not `id("admin")` (`operix-demo:admin`-derived).
+  - On the skip path, stdout contains `Administrator already exists; bootstrap skipped.` and does not contain `Administrator bootstrap completed`.
+- [ ] **Step 2: Run to verify failure:** `node --import tsx --test tests/seed.test.ts`.
+- [ ] **Step 3: Implement.** The bootstrap admin gets `crypto.randomUUID()` (grep first: no other code may rely on `id("admin")`). The closing `Administrator bootstrap completed; existing credentials were preserved.` line prints only when this run inserted the admin.
+- [ ] **Step 4: Docs.** In the `ADMIN_EMAIL / ADMIN_PASSWORD` row of `docs/DEPLOYMENT.md`, add that the NAS Portainer template (`deploy/nas/compose.template.json`) still requires both variables, so keep them in that deployment.
+- [ ] **Step 5: Verify** the focused test and the Global Constraints checks.
+- [ ] **Step 6: Commit** `fix: tidy admin bootstrap seed identity and output`.
+
+### Task 10: Worker status, stack redaction and notification state
+
+**Files:**
+- Modify: `src/lib/error-log.ts`, `src/lib/maintenance.ts`, `scripts/worker.ts`, `src/components/shell.tsx`
+- Modify: `tests/error-log.test.ts`
+
+**Interfaces:**
+- Produces in `src/lib/maintenance.ts`: `export async function recordMaintenanceOutcome(db: { query: (sql: string, params?: any[]) => Promise<unknown> }, outcome: { failed: string[]; durationMs: number }, log: (line: string) => void = console.error): Promise<void>` — performs today's success UPDATE (with `last_duration_ms`) when `failed` is empty, otherwise today's failure UPDATE (`last_error = maintenance_failed:<names>`); it never throws: if the UPDATE fails it logs one JSON line `{ event: "operix.worker.status_failed", ...errorSummary(e) }` and then tries `UPDATE job_runs SET last_error='status_update_failed',started_at=NULL WHERE id='worker'` once more, swallowing (but logging) that failure too.
+
+- [ ] **Step 1: Write the failing tests:**
+  - `errorSummary` of an error with `code "22P02"` and message `invalid input syntax for type uuid: "line1\nat secret@x.y"` (also with leading spaces before `at`) contains no `secret@x.y` anywhere in `JSON.stringify(result)`.
+  - `recordMaintenanceOutcome` with a fake db: empty `failed` → one success UPDATE with the duration; `failed ["b"]` → one UPDATE whose parameters include `maintenance_failed:b`; a db whose `query` throws → the call resolves, `log` received the `operix.worker.status_failed` line and the fallback UPDATE was attempted.
+- [ ] **Step 2: Run to verify failure:** `node --import tsx --test tests/error-log.test.ts`.
+- [ ] **Step 3: Implement.** `stackFrames` skips the header by counting the message's lines when the stack starts with `<name>: <message>`, and falls back to the first `at ` line only otherwise. `scripts/worker.ts` replaces its two inline UPDATE branches with `recordMaintenanceOutcome` (keep the `operix.worker.completed` / `operix.worker.failed` log lines and the `--once` exit code). In `shell.tsx` the "모두 읽음" success path uses a functional update (`setNotifications((current) => current.map(...))`).
+- [ ] **Step 4: Verify** the focused test, `bash …/scratchpad/e2e.sh e2e/notifications.spec.ts`, and the Global Constraints checks.
+- [ ] **Step 5: Commit** `fix: harden worker status updates, stack redaction and notification state`.
+
+### Task 11: Shared script test helpers
+
+**Files:**
+- Create: `tests/helpers/script-db.ts`
+- Modify: `tests/seed.test.ts`, `tests/error-log.test.ts`, `tests/migration-connection.test.ts`
+
+**Interfaces:**
+- Produces in `tests/helpers/script-db.ts`: one `runScript` (child process `node --import tsx scripts/<name>.ts` against a PGlite directory, returning `{ code, stdout, stderr }`) and one PGlite-directory helper, unifying the three existing copies. Keep the most widely used existing names and signatures.
+
+- [ ] **Step 1:** Extract the helpers and switch all three files to them without changing any test's behaviour, title or count.
+- [ ] **Step 2: Verify** the three files and the Global Constraints checks; the total test count must equal the count before this task.
+- [ ] **Step 3: Commit** `test: share the script and PGlite helpers`.
