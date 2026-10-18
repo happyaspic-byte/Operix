@@ -92,8 +92,8 @@ export async function readLimited(
     reader.releaseLock();
   }
 }
-export async function readJson(request: Request): Promise<Record<string, any>> {
-  const bytes = await readLimited(request, 1024 * 1024);
+const maxJsonBytes = 1024 * 1024;
+function parseJsonObject(bytes: Uint8Array): Record<string, any> {
   let data: unknown;
   try {
     data = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -103,6 +103,16 @@ export async function readJson(request: Request): Promise<Record<string, any>> {
   if (data === null || typeof data !== "object" || Array.isArray(data))
     throw new AppError(400, "JSON 객체를 전달해 주세요.");
   return data as Record<string, any>;
+}
+export async function readJson(request: Request): Promise<Record<string, any>> {
+  return parseJsonObject(await readLimited(request, maxJsonBytes));
+}
+// Next.js passes a zero-byte stream, not null, for a PATCH sent without a body.
+export async function readOptionalJson(
+  request: Request,
+): Promise<Record<string, any> | null> {
+  const bytes = await readLimited(request, maxJsonBytes);
+  return bytes.byteLength ? parseJsonObject(bytes) : null;
 }
 export async function readMultipart(
   request: Request,
