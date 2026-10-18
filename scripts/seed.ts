@@ -17,6 +17,7 @@ const earliestActiveAdmin = async () =>
     )
   )[0];
 let admin = await earliestActiveAdmin();
+let bootstrapped = false;
 if (admin) console.log("Administrator already exists; bootstrap skipped.");
 else {
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase(),
@@ -25,13 +26,12 @@ else {
     throw new Error(
       "Set ADMIN_EMAIL and a unique ADMIN_PASSWORD of 12+ characters before seeding.",
     );
-  const hash = await hashPassword(password),
-    adminId = id("admin");
-  // No conflict target: the fixed id as well as the email may already exist.
-  await db.query(
-    "INSERT INTO users(id,email,name,role,password_hash,must_change_password) VALUES ($1,$2,'관리자','admin',$3,$4) ON CONFLICT DO NOTHING",
+  const hash = await hashPassword(password);
+  // The email may belong to an existing account; the check below reports it.
+  const inserted = await db.query(
+    "INSERT INTO users(id,email,name,role,password_hash,must_change_password) VALUES ($1,$2,'관리자','admin',$3,$4) ON CONFLICT DO NOTHING RETURNING id",
     [
-      adminId,
+      crypto.randomUUID(),
       email,
       hash,
       ![
@@ -41,6 +41,7 @@ else {
       ].some(Boolean),
     ],
   );
+  bootstrapped = inserted.length > 0;
   admin = await earliestActiveAdmin();
   if (!admin)
     throw new Error(
@@ -311,7 +312,8 @@ if (process.env.SEED_DEMO === "1") {
     "Synthetic demonstration data seeded. No real customer data was used.",
   );
 }
-console.log(
-  "Administrator bootstrap completed; existing credentials were preserved.",
-);
+if (bootstrapped)
+  console.log(
+    "Administrator bootstrap completed; existing credentials were preserved.",
+  );
 await db.close();
