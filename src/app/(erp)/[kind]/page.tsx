@@ -7,6 +7,6 @@ export default async function Page({
   params: Promise<{ kind: string }>;
 }) {
   const { kind } = await params;
-  if (!catalog[kind]) notFound();
+  if (!Object.hasOwn(catalog, kind)) notFound();
   return <EntityList entity={kind} />;
 }
