@@ -1,3 +1,4 @@
+import { assertRecordWritable } from "@/lib/record-state";
 import { z } from "zod";
 import { lockBusiness } from "@/lib/transactions";
 import { securityLog } from "@/lib/security";
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
     await db.transaction(async (tx) => {
       await lockBusiness(tx);
       const rec = await getRecord(b.entity_kind, b.entity_id, u, tx);
+      assertRecordWritable(rec);
       if (u.role === "engineer" && rec.assignee_id && rec.assignee_id !== u.id)
         throw new AppError(403, "담당 작업에만 기록할 수 있습니다.");
       await tx.query(

@@ -1,3 +1,4 @@
+import { assertRecordWritable } from "./record-state";
 import { getDb, type Database, type Row } from "./db";
 import { getRecord, saveRecord } from "./records";
 import { audit, type User } from "./auth";
@@ -71,7 +72,7 @@ export async function createFollowUp(
   return db.transaction(async (tx) => {
     await lockBusiness(tx);
     const rec = await getRecord("inspections", inspectionId, user, tx);
-    if (rec.privacy_erased_at) throw new AppError(410, "파기된 업무입니다.");
+    assertRecordWritable(rec);
     if (
       user.role === "engineer" &&
       rec.assignee_id &&

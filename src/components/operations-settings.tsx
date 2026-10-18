@@ -35,10 +35,20 @@ export function OperationsSettings({
             </dd>
           </div>
           <div>
-            <dt>백업</dt>
+            <dt>암호화 백업</dt>
             <dd>
               {health?.backup?.required
-                ? health.backup.ok
+                ? health.backup.local_ok
+                  ? "정상"
+                  : "지연 또는 미확인"
+                : "감시 미설정"}
+            </dd>
+          </div>
+          <div>
+            <dt>외부 백업 복사</dt>
+            <dd>
+              {health?.backup?.remote?.required
+                ? health.backup.remote.ok
                   ? "정상"
                   : "지연 또는 미확인"
                 : "감시 미설정"}
