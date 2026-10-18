@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { AppError } from "./policy";
 import { validDate } from "./dates";
+import { errorSummary } from "./error-log";
 import { z } from "zod";
 export function failure(error: unknown) {
   const requestId = crypto.randomUUID();
@@ -35,6 +36,7 @@ export function failure(error: unknown) {
     JSON.stringify({
       event: "operix.request.failed",
       request_id: requestId,
+      ...errorSummary(error),
       code: code || "internal_error",
     }),
   );
