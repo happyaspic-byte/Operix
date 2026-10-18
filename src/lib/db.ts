@@ -1,4 +1,4 @@
-import { Pool, types } from "pg";
+import { Client, Pool, types, type ClientConfig } from "pg";
 types.setTypeParser(1082, (value) => value);
 import { PGlite } from "@electric-sql/pglite";
 import { mkdir } from "node:fs/promises";
@@ -117,4 +117,42 @@ async function connect(): Promise<Database> {
     },
   });
   return wrap(pg);
+}
+export const MIGRATION_LOCK_KEY = 7305010;
+// Migrations run on their own connection so they do not inherit the pool's
+// statement and query timeouts. pg sends no statement_timeout for 0, so the
+// server default applies.
+export function migrationClientConfig(connectionString: string): ClientConfig {
+  return {
+    connectionString: withSessionTimeZone(connectionString),
+    connectionTimeoutMillis: 10000,
+    statement_timeout: 0,
+    lock_timeout: 60000,
+    application_name: "operix-migrate",
+  };
+}
+export async function connectForMigrations(): Promise<Database> {
+  if (!process.env.DATABASE_URL) return getDb();
+  const client = new Client(migrationClientConfig(process.env.DATABASE_URL));
+  await client.connect();
+  const db: Database = {
+    query: async (sql, params = []) =>
+      normalize((await client.query(sql, params)).rows) as any,
+    exec: async (sql) => {
+      await client.query(sql);
+    },
+    transaction: async (fn) => {
+      await client.query("BEGIN");
+      try {
+        const value = await fn(db);
+        await client.query("COMMIT");
+        return value;
+      } catch (e) {
+        await client.query("ROLLBACK");
+        throw e;
+      }
+    },
+    close: () => client.end(),
+  };
+  return db;
 }
