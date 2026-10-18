@@ -11,12 +11,15 @@ import {
   connectForMigrations,
   MIGRATION_LOCK_KEY,
   migrationClientConfig,
-  withSessionTimeZone,
 } from "../src/lib/db.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const postgresUrl = "postgresql://u:p@db:5432/operix";
 const run = promisify(execFile);
+const sessionSetup = [
+  "SET TIME ZONE 'Asia/Seoul'",
+  "SET statement_timeout = 0",
+];
 const lock = `SELECT pg_advisory_lock($1) [${MIGRATION_LOCK_KEY}]`;
 const unlock = `SELECT pg_advisory_unlock($1) [${MIGRATION_LOCK_KEY}]`;
 
@@ -90,17 +93,13 @@ const applied = (lines: string[]) =>
 test("the migration client config leaves out the pool's request timeouts", () => {
   const config = migrationClientConfig(postgresUrl);
   assert.deepEqual(config, {
-    connectionString: withSessionTimeZone(postgresUrl),
+    connectionString: postgresUrl,
     connectionTimeoutMillis: 10000,
-    statement_timeout: 0,
     lock_timeout: 60000,
     application_name: "operix-migrate",
   });
-  assert.equal(
-    new URL(config.connectionString!).searchParams.get("options"),
-    "-c TimeZone=Asia/Seoul",
-  );
   assert.equal("query_timeout" in config, false);
+  assert.equal("statement_timeout" in config, false);
 });
 
 test("the PostgreSQL migration connection is one client with explicit transactions", async (t) => {
@@ -122,6 +121,7 @@ test("the PostgreSQL migration connection is one client with explicit transactio
   await db.close();
 
   assert.deepEqual(sent, [
+    ...sessionSetup,
     "SELECT dates",
     "BEGIN",
     "CREATE TABLE probe()",
@@ -147,8 +147,8 @@ test("on PostgreSQL migrate locks the whole run and a changed migration still fa
 
   // Importing the script runs it once, as `node scripts/migrate.ts` does.
   const { migrate } = await import("../scripts/migrate.ts");
-  assert.equal(sent[0], lock);
-  assert.match(sent[1], /^CREATE TABLE IF NOT EXISTS schema_migrations/);
+  assert.deepEqual(sent.slice(0, 3), [...sessionSetup, lock]);
+  assert.match(sent[3], /^CREATE TABLE IF NOT EXISTS schema_migrations/);
   assert.deepEqual(sent.slice(-2), [unlock, "end"]);
   assert.equal(sent.filter((sql) => sql.includes("pg_advisory")).length, 2);
   assert.deepEqual(
@@ -161,7 +161,7 @@ test("on PostgreSQL migrate locks the whole run and a changed migration still fa
   sent.length = 0;
   log.mock.resetCalls();
   await migrate();
-  assert.equal(sent[0], lock);
+  assert.deepEqual(sent.slice(0, 3), [...sessionSetup, lock]);
   assert.deepEqual(sent.slice(-2), [unlock, "end"]);
   assert.ok(!sent.includes("BEGIN"));
   assert.deepEqual(applied(logged()), []);
@@ -170,7 +170,7 @@ test("on PostgreSQL migrate locks the whole run and a changed migration still fa
   sent.length = 0;
   ledger.set("001_initial.sql", "changed");
   await assert.rejects(migrate(), /Migration changed: 001_initial\.sql/);
-  assert.equal(sent[0], lock);
+  assert.deepEqual(sent.slice(0, 3), [...sessionSetup, lock]);
   assert.deepEqual(sent.slice(-2), [unlock, "end"]);
   assert.ok(!sent.includes("BEGIN"));
 });

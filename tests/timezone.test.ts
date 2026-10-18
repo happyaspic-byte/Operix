@@ -1,8 +1,11 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { inspect } from "node:util";
 import { isolatedDatabase } from "./helpers/isolated-db.ts";
-import { DB_TIME_ZONE, withSessionTimeZone } from "../src/lib/db.ts";
+import {
+  applySessionTimeZone,
+  DB_TIME_ZONE,
+  poolConfig,
+} from "../src/lib/db.ts";
 import { saveRecord, listRecords } from "../src/lib/records.ts";
 import { createReport, reportDocumentNumber } from "../src/lib/reports.ts";
 import { addDays, todayKST } from "../src/lib/dates.ts";
@@ -25,40 +28,32 @@ before(async () => {
 });
 after(async () => isolated?.close());
 
-const bareUrl = "postgresql://u:p@db:5432/operix";
+const malformedEscapeUrl = "postgresql://operix:p%ssw0rd!@db:5432/operix";
 const urlWithOptions =
   "postgresql://u:p@db:5432/operix?options=-c%20search_path%3Dtest_schema&sslmode=disable";
 
-test("the Asia/Seoul session option is added to a URL without options", () => {
+test("the session time zone is set with one Asia/Seoul statement", async () => {
+  const sent: string[] = [];
+  await applySessionTimeZone({
+    query: async (sql) => {
+      sent.push(sql);
+    },
+  });
   assert.equal(DB_TIME_ZONE, "Asia/Seoul");
-  assert.equal(
-    new URL(withSessionTimeZone(bareUrl)).searchParams.get("options"),
-    "-c TimeZone=Asia/Seoul",
-  );
+  assert.deepEqual(sent, ["SET TIME ZONE 'Asia/Seoul'"]);
 });
 
-test("the Asia/Seoul session option keeps existing options and parameters", () => {
-  const url = new URL(withSessionTimeZone(urlWithOptions));
-  assert.equal(
-    url.searchParams.get("options"),
-    "-c search_path=test_schema -c TimeZone=Asia/Seoul",
-  );
-  assert.equal(url.searchParams.get("sslmode"), "disable");
-});
-
-test("applying the Asia/Seoul session option twice changes nothing", () => {
-  for (const connectionString of [bareUrl, urlWithOptions]) {
-    const once = withSessionTimeZone(connectionString);
-    assert.equal(withSessionTimeZone(once), once);
-  }
-});
-
-test("an invalid connection URL is rejected without echoing its password", () => {
-  assert.throws(
-    () => withSessionTimeZone("postgresql://u:sup3r-secret@db:notaport/operix"),
-    (error) =>
-      error instanceof Error && !inspect(error).includes("sup3r-secret"),
-  );
+test("the pool config sets the Asia/Seoul session on connect and leaves the connection string alone", () => {
+  for (const connectionString of [malformedEscapeUrl, urlWithOptions])
+    assert.deepEqual(poolConfig(connectionString), {
+      connectionString,
+      max: 8,
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000,
+      statement_timeout: 30000,
+      query_timeout: 35000,
+      onConnect: applySessionTimeZone,
+    });
 });
 
 test("the database session time zone is Asia/Seoul", async () => {
