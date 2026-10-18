@@ -26,6 +26,18 @@ function normalize(rows: Row[]) {
     ),
   );
 }
+export const DB_TIME_ZONE = "Asia/Seoul";
+export function withSessionTimeZone(connectionString: string): string {
+  // The TypeError from new URL() carries the whole input, password included.
+  if (!URL.canParse(connectionString))
+    throw new Error("Invalid database connection URL.");
+  const url = new URL(connectionString);
+  const option = `-c TimeZone=${DB_TIME_ZONE}`;
+  const options = url.searchParams.get("options") || "";
+  if (` ${options} `.includes(` ${option} `)) return connectionString;
+  url.searchParams.set("options", `${options} ${option}`.trim());
+  return url.toString();
+}
 let pending: Promise<Database> | undefined;
 let metricsPool: Pool | undefined;
 export function poolMetrics() {
@@ -44,7 +56,7 @@ export async function getDb(): Promise<Database> {
 async function connect(): Promise<Database> {
   if (process.env.DATABASE_URL) {
     const pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: withSessionTimeZone(process.env.DATABASE_URL),
       max: 8,
       connectionTimeoutMillis: 10000,
       idleTimeoutMillis: 30000,
@@ -91,6 +103,7 @@ async function connect(): Promise<Database> {
     await mkdir(dirname(path), { recursive: true });
   const pg = new PGlite(path);
   await pg.waitReady;
+  await pg.exec(`SET TIME ZONE '${DB_TIME_ZONE}'`);
   const wrap = (client: any): Database => ({
     query: async (sql, params = []) =>
       normalize((await client.query(sql, params)).rows) as any,

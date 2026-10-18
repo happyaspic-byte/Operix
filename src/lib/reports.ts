@@ -2,11 +2,17 @@ import { assertRecordWritable } from "./record-state";
 import { z } from "zod";
 import { getDb, type Database } from "./db";
 import { audit, type User } from "./auth";
+import { todayKST } from "./dates";
 import { AppError, requirePermission } from "./policy";
 import { canReadClass, readableClasses } from "./document-policy";
 import { parseInput, pagination, queryDate } from "./http";
 import { getRecord } from "./records";
 import { lockBusiness } from "./transactions";
+export function reportDocumentNumber(id: string, today = todayKST()): string {
+  return (
+    "OPX-" + today.replaceAll("-", "") + "-" + id.slice(0, 8).toUpperCase()
+  );
+}
 export async function listReports(
   user: User,
   q: URLSearchParams,
@@ -121,11 +127,7 @@ export async function createReport(user: User, input: unknown) {
     );
     const id = crypto.randomUUID(),
       revision = max.revision + 1,
-      documentNumber =
-        "OPX-" +
-        new Date().toISOString().slice(0, 10).replaceAll("-", "") +
-        "-" +
-        id.slice(0, 8).toUpperCase();
+      documentNumber = reportDocumentNumber(id);
     await tx.query(
       "INSERT INTO reports(id,entity_kind,entity_id,revision,title,snapshot,approved_by,classification,audience,issue_reason,document_number) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
       [
