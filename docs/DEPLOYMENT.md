@@ -24,7 +24,7 @@ docker compose logs --tail=80 migrate web worker scanner
 | SESSION_SECRET | 독립된 32자 이상 난수 |
 | SECURITY_LOG_KEY | 세션 키와 다른 32자 이상 난수. 로그·파기 원장의 검증에 필요 |
 | POSTGRES_PASSWORD | 독립된 비밀번호. 내부 연결 URL을 위해 hex 난수 권장 |
-| ADMIN_EMAIL / ADMIN_PASSWORD | 최초 관리자, 최소 12자 초기 비밀번호 |
+| ADMIN_EMAIL / ADMIN_PASSWORD | 최초 관리자, 최소 12자 초기 비밀번호. 첫 관리자가 생성될 때까지만 필요하며, 이후 `.env`에서 제거할 수 있다 |
 | SEED_DEMO | `0` |
 | FILE_SCAN_MODE | `clamav` |
 | TRUST_PROXY_HEADERS | 승인된 프록시가 클라이언트 헤더를 덮어쓸 때만 `1` |
