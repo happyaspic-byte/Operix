@@ -312,8 +312,5 @@ if (process.env.SEED_DEMO === "1") {
     "Synthetic demonstration data seeded. No real customer data was used.",
   );
 }
-if (bootstrapped)
-  console.log(
-    "Administrator bootstrap completed; existing credentials were preserved.",
-  );
+if (bootstrapped) console.log("Administrator bootstrap completed.");
 await db.close();

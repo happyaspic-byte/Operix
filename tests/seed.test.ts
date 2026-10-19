@@ -57,9 +57,7 @@ test("seeding with ADMIN_EMAIL and ADMIN_PASSWORD creates one active administrat
   const result = await runScript("seed", bootstrap, dir);
   assert.equal(result.code, 0, result.stderr);
   assert.ok(
-    result.stdout.includes(
-      "Administrator bootstrap completed; existing credentials were preserved.",
-    ),
+    result.stdout.includes("Administrator bootstrap completed.\n"),
     result.stdout,
   );
   const { rows } = await inDatabase((db) => db.query(activeAdmins), dir);
