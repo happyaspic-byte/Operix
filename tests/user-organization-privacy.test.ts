@@ -11,6 +11,10 @@ import {
 } from "../src/lib/privacy.ts";
 import type { User } from "../src/lib/auth.ts";
 
+process.env.SESSION_SECRET =
+  process.env.SESSION_SECRET ||
+  "test-only-session-secret-with-at-least-32-characters";
+
 test("organization changes invalidate erasure previews and approved erasure clears department and job title", async () => {
   const isolated = await isolatedDatabase();
   const oldDir = process.env.SECURITY_LOG_DIR;

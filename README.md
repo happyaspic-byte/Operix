@@ -28,7 +28,9 @@
 
 **2026-09-05 검증: 도메인 63/63 + 브라우저 16/16 통과** ([검증 커밋 eb60e1f](https://github.com/happyaspic-byte/Operix/commit/eb60e1f4554812b8a891aacaf635c4cf28b7afda)). 개선안 대응 점수는 공개 산식 기준 **68.2/100**이며 보안 인증이나 ERP 완성도 점수가 아닙니다.
 
-**2026-09-08 worktree 통합 검증: PostgreSQL 단위·DB 110/110 + 브라우저·API 33/33 통과.** UI·보안·버그 수정·문서 변경을 최신 main 기준에 병합했고, 타입 검사·lint·빌드도 통과했습니다. [통합 기록](docs/INTEGRATION-2026-09-08.md)에 실행별 코드 기준과 로컬 결과를 구분했습니다. 커밋별 원격 검증 결과는 [GitHub Actions](https://github.com/happyaspic-byte/Operix/actions/workflows/ci.yml)에서 확인하세요.
+최신 검증은 [커밋별 GitHub Actions](https://github.com/happyaspic-byte/Operix/actions/workflows/ci.yml)와 해당 실행의 `operix-verification` 아티팩트를 기준으로 확인하세요. 도메인·브라우저 결과, 정확한 커밋과 성능 측정이 포함됩니다. [운영 보강과 배포 확인](docs/OPERATIONS-HARDENING-2026-09.md), [다음 기능 후보](docs/FEATURE-CANDIDATES.md)를 참고하세요.
+
+**과거 기록 — 2026-09-08 worktree 통합 검증: PostgreSQL 단위·DB 110/110 + 브라우저·API 33/33 통과.** UI·보안·버그 수정·문서 변경을 최신 main 기준에 병합했고, 타입 검사·lint·빌드도 통과했습니다. [통합 기록](docs/INTEGRATION-2026-09-08.md)에 실행별 코드 기준과 로컬 결과를 구분했습니다. 커밋별 원격 검증 결과는 [GitHub Actions](https://github.com/happyaspic-byte/Operix/actions/workflows/ci.yml)에서 확인하세요.
 
 [33개 개선 추적표](docs/IMPROVEMENTS-2026-09-05.md) · [실행 결과·점수·화면](docs/VERIFICATION.md) · [자동 검증](https://github.com/happyaspic-byte/Operix/actions/workflows/ci.yml) · [ERP 비교](docs/COMPARISON.md).
 

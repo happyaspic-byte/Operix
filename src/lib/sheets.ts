@@ -51,11 +51,18 @@ export async function parseSheet(
       throw new AppError(400, "XLSX 내용을 읽을 수 없습니다.");
     }
     sheet = workbook.worksheets[0];
-  } else if (file.name.toLowerCase().endsWith(".csv"))
-    sheet = await workbook.csv.read(Readable.from(bytes), {
-      map: (value: string) => value,
-    });
-  else throw new AppError(400, "XLSX 또는 CSV 파일을 선택해 주세요.");
+  } else if (file.name.toLowerCase().endsWith(".csv")) {
+    try {
+      sheet = await workbook.csv.read(Readable.from(bytes), {
+        map: (value: string) => value,
+      });
+    } catch {
+      throw new AppError(
+        400,
+        "CSV 내용을 읽을 수 없습니다. 따옴표와 열 구분을 확인해 주세요.",
+      );
+    }
+  } else throw new AppError(400, "XLSX 또는 CSV 파일을 선택해 주세요.");
   if (!sheet || sheet.rowCount < 2)
     throw new AppError(400, "머리글과 데이터 행이 필요합니다.");
   if (sheet.rowCount > 1001)

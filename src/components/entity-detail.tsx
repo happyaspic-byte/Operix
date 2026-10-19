@@ -29,6 +29,14 @@ import {
   defaultClassification,
 } from "@/lib/document-policy";
 import { RecordTable } from "./record-table";
+const relationLabelKeys: Record<string, string> = {
+  customer_id: "customer_name",
+  site_id: "site_name",
+  asset_id: "asset_name",
+  owner_id: "owner_name",
+  assignee_id: "assignee_name",
+  predecessor_id: "predecessor_name",
+};
 export function EntityDetail({ kind, id }: { kind: string; id: string }) {
   const user = useUser(),
     config = catalog[kind],
@@ -150,19 +158,8 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
         </div>
       );
     if (f.type === "relation") {
-      const label =
-        record[f.key.replace("_id", "_name")] ||
-        record[
-          f.key === "owner_id"
-            ? "owner_name"
-            : f.key === "assignee_id"
-              ? "assignee_name"
-              : f.key === "asset_id"
-                ? "asset_name"
-                : f.key === "site_id"
-                  ? "site_name"
-                  : "customer_name"
-        ];
+      const labelKey = relationLabelKeys[f.key];
+      const label = labelKey ? record[labelKey] : undefined;
       return v && f.entity !== "users" ? (
         <Link className="inline-link" href={`/${f.entity}/${v}`}>
           {label || v}

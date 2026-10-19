@@ -1,5 +1,11 @@
+import { assertSupportedNodeVersion } from "./runtime-version.mjs";
+assertSupportedNodeVersion();
 import { setTimeout as delay } from "node:timers/promises";
 import { runJobs } from "../src/lib/jobs.ts";
+import {
+  recordMaintenanceOutcome,
+  runMaintenanceJobs,
+} from "../src/lib/maintenance.ts";
 import { getDb } from "../src/lib/db.ts";
 import { scanPendingDocuments } from "../src/lib/documents.ts";
 import { purgeDeletedFiles } from "../src/lib/privacy.ts";
@@ -20,25 +26,29 @@ async function tick() {
     "UPDATE job_runs SET heartbeat_at=now(),started_at=now() WHERE id='worker' AND (started_at IS NULL OR started_at<now()-interval '10 minutes') RETURNING id",
   );
   if (!claimed.length) return;
-  try {
-    const result = await runJobs();
-    await purgeDeletedFiles();
-    await scanPendingDocuments();
-    await db.query(
-      "UPDATE job_runs SET heartbeat_at=now(),last_success=now(),last_error=NULL,last_duration_ms=$1,started_at=NULL WHERE id='worker'",
-      [Date.now() - start],
-    );
+  let result: Awaited<ReturnType<typeof runJobs>> | undefined;
+  const failed = await runMaintenanceJobs([
+    [
+      "runJobs",
+      async () => {
+        result = await runJobs();
+      },
+    ],
+    ["purgeDeletedFiles", purgeDeletedFiles],
+    ["scanPendingDocuments", scanPendingDocuments],
+  ]);
+  const durationMs = Date.now() - start;
+  const recorded = await recordMaintenanceOutcome(db, { failed, durationMs });
+  if (once && !recorded) process.exitCode = 1;
+  if (!failed.length) {
     console.log(
       JSON.stringify({
         event: "operix.worker.completed",
-        duration_ms: Date.now() - start,
+        duration_ms: durationMs,
         ...result,
       }),
     );
-  } catch {
-    await db.query(
-      "UPDATE job_runs SET heartbeat_at=now(),last_error='maintenance_failed',started_at=NULL WHERE id='worker'",
-    );
+  } else {
     console.error(JSON.stringify({ event: "operix.worker.failed" }));
     if (once) process.exitCode = 1;
   }

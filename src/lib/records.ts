@@ -1,3 +1,4 @@
+import { assertRecordWritable } from "./record-state";
 import { getDb, type Database, type Row } from "./db";
 import { catalog } from "./catalog";
 import { audit, type User } from "./auth";
@@ -23,9 +24,12 @@ export function selection(kind: string) {
     case "assets":
       return "SELECT e.*,s.name site_name,c.name customer_name,c.id customer_id,u.name owner_name FROM assets e LEFT JOIN sites s ON s.id=e.site_id LEFT JOIN customers c ON c.id=s.customer_id LEFT JOIN users u ON u.id=e.owner_id";
     case "contracts":
-      return "SELECT e.*,c.name customer_name,u.name owner_name,COALESCE((SELECT jsonb_agg(asset_id) FROM contract_assets WHERE contract_id=e.id),'[]') asset_ids FROM contracts e JOIN customers c ON c.id=e.customer_id LEFT JOIN users u ON u.id=e.owner_id";
+      return "SELECT e.*,c.name customer_name,u.name owner_name,p.name predecessor_name,COALESCE((SELECT jsonb_agg(asset_id) FROM contract_assets WHERE contract_id=e.id),'[]') asset_ids FROM contracts e JOIN customers c ON c.id=e.customer_id LEFT JOIN users u ON u.id=e.owner_id LEFT JOIN contracts p ON p.id=e.predecessor_id";
     case "tickets":
       return "SELECT e.*,c.name customer_name,u.name assignee_name,COALESCE((SELECT jsonb_agg(asset_id) FROM ticket_assets WHERE ticket_id=e.id),'[]') asset_ids FROM tickets e JOIN customers c ON c.id=e.customer_id LEFT JOIN users u ON u.id=e.assignee_id";
+    case "components":
+    case "vms":
+      return `SELECT e.*,a.name asset_name FROM ${kind} e JOIN assets a ON a.id=e.asset_id`;
     case "maintenance_plans":
       return `SELECT e.*,a.name asset_name,c.name customer_name,u.name assignee_name FROM ${kind} e JOIN assets a ON a.id=e.asset_id${customerJoin} LEFT JOIN users u ON u.id=e.assignee_id`;
     case "inspections":
@@ -400,8 +404,7 @@ export async function saveRecord(
       data.assignee_id = user.id;
     }
     await validateRelations(tx, kind, data, previous);
-    if (previous?.privacy_erased_at)
-      throw new AppError(410, "파기된 자료는 다시 수정할 수 없습니다.");
+    if (previous) assertRecordWritable(previous);
     if (kind === "assets" && previous && previous.site_id !== data.site_id) {
       if (previous.site_id && !data.site_id)
         throw new AppError(
@@ -434,13 +437,13 @@ export async function saveRecord(
       previous.customer_id !== data.customer_id
     ) {
       const children = await tx.query(
-        "SELECT id FROM assets WHERE site_id=$1 LIMIT 1",
+        "SELECT id FROM assets WHERE site_id=$1 UNION ALL SELECT id FROM customer_contacts WHERE site_id=$1 LIMIT 1",
         [id],
       );
       if (children.length)
         throw new AppError(
           409,
-          "자산이 있는 사업장의 고객사는 변경할 수 없습니다.",
+          "자산이나 담당자가 연결된 사업장의 고객사는 변경할 수 없습니다.",
         );
     }
     if (

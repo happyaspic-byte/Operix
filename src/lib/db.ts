@@ -1,4 +1,4 @@
-import { Pool, types } from "pg";
+import { Client, Pool, types, type ClientConfig, type PoolConfig } from "pg";
 types.setTypeParser(1082, (value) => value);
 import { PGlite } from "@electric-sql/pglite";
 import { mkdir } from "node:fs/promises";
@@ -26,6 +26,25 @@ function normalize(rows: Row[]) {
     ),
   );
 }
+export const DB_TIME_ZONE = "Asia/Seoul";
+export async function applySessionTimeZone(client: {
+  query: (sql: string) => Promise<unknown>;
+}): Promise<void> {
+  await client.query(`SET TIME ZONE '${DB_TIME_ZONE}'`);
+}
+// pg-pool awaits onConnect before it hands out a new connection, so the
+// session time zone never depends on the connection string.
+export function poolConfig(connectionString: string): PoolConfig {
+  return {
+    connectionString,
+    max: 8,
+    connectionTimeoutMillis: 10000,
+    idleTimeoutMillis: 30000,
+    statement_timeout: 30000,
+    query_timeout: 35000,
+    onConnect: applySessionTimeZone,
+  };
+}
 let pending: Promise<Database> | undefined;
 let metricsPool: Pool | undefined;
 export function poolMetrics() {
@@ -43,14 +62,7 @@ export async function getDb(): Promise<Database> {
 }
 async function connect(): Promise<Database> {
   if (process.env.DATABASE_URL) {
-    const pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      max: 8,
-      connectionTimeoutMillis: 10000,
-      idleTimeoutMillis: 30000,
-      statement_timeout: 30000,
-      query_timeout: 35000,
-    });
+    const pool = new Pool(poolConfig(process.env.DATABASE_URL));
     metricsPool = pool;
     pool.on("error", () =>
       console.error(JSON.stringify({ event: "operix.database.pool_error" })),
@@ -91,6 +103,7 @@ async function connect(): Promise<Database> {
     await mkdir(dirname(path), { recursive: true });
   const pg = new PGlite(path);
   await pg.waitReady;
+  await applySessionTimeZone(pg);
   const wrap = (client: any): Database => ({
     query: async (sql, params = []) =>
       normalize((await client.query(sql, params)).rows) as any,
@@ -104,4 +117,48 @@ async function connect(): Promise<Database> {
     },
   });
   return wrap(pg);
+}
+export const MIGRATION_LOCK_KEY = 7305010;
+// Migrations run on their own connection so they do not inherit the pool's
+// statement and query timeouts. pg never sends statement_timeout: 0, so
+// connectForMigrations sets it explicitly.
+export function migrationClientConfig(connectionString: string): ClientConfig {
+  return {
+    connectionString,
+    connectionTimeoutMillis: 10000,
+    lock_timeout: 60000,
+    application_name: "operix-migrate",
+  };
+}
+export async function connectForMigrations(): Promise<Database> {
+  if (!process.env.DATABASE_URL) return getDb();
+  const client = new Client(migrationClientConfig(process.env.DATABASE_URL));
+  await client.connect();
+  try {
+    await applySessionTimeZone(client);
+    await client.query("SET statement_timeout = 0");
+  } catch (error) {
+    await client.end().catch(() => {});
+    throw error;
+  }
+  const db: Database = {
+    query: async (sql, params = []) =>
+      normalize((await client.query(sql, params)).rows) as any,
+    exec: async (sql) => {
+      await client.query(sql);
+    },
+    transaction: async (fn) => {
+      await client.query("BEGIN");
+      try {
+        const value = await fn(db);
+        await client.query("COMMIT");
+        return value;
+      } catch (e) {
+        await client.query("ROLLBACK");
+        throw e;
+      }
+    },
+    close: () => client.end(),
+  };
+  return db;
 }

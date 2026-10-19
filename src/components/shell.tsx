@@ -20,7 +20,7 @@ import {
 import type { User } from "@/lib/auth";
 import { catalog } from "@/lib/catalog";
 import { roleNames } from "@/lib/policy";
-import { UserContext, api } from "./ui";
+import { ErrorNotice, UserContext, api } from "./ui";
 const nav = [
   { href: "dashboard", label: "대시보드", icon: LayoutDashboard },
   { href: "customers", label: "고객·사업장", icon: Building2 },
@@ -47,6 +47,7 @@ export function Shell({
     [notifications, setNotifications] = useState<any[]>([]),
     [unreadTotal, setUnreadTotal] = useState(0),
     [panel, setPanel] = useState(false),
+    [notificationError, setNotificationError] = useState(""),
     [searchError, setSearchError] = useState("");
   const current =
     nav.find((n) => pathname.startsWith("/" + n.href))?.label ||
@@ -59,6 +60,7 @@ export function Shell({
     setMenu(false);
     setQ("");
     setPanel(false);
+    setNotificationError("");
   }, [pathname]);
   useEffect(() => {
     if (user.must_change_password) return;
@@ -338,7 +340,10 @@ export function Shell({
                   className={`icon-button ${unreadTotal > 0 ? "has-unread" : ""}`}
                   aria-label="알림"
                   aria-expanded={panel}
-                  onClick={() => setPanel(!panel)}
+                  onClick={() => {
+                    setPanel(!panel);
+                    setNotificationError("");
+                  }}
                 >
                   <Bell size={19} />
                 </button>
@@ -348,19 +353,26 @@ export function Shell({
                       <strong>업무 알림</strong>
                       <button
                         onClick={async () => {
-                          await api("/api/notifications", { method: "PATCH" });
-                          setUnreadTotal(0);
-                          setNotifications(
-                            notifications.map((n) => ({
-                              ...n,
-                              read_at: new Date().toISOString(),
-                            })),
-                          );
+                          try {
+                            await api("/api/notifications", {
+                              method: "PATCH",
+                              body: JSON.stringify({ all: true }),
+                            });
+                            setNotificationError("");
+                            setUnreadTotal(0);
+                            const readAt = new Date().toISOString();
+                            setNotifications((old) =>
+                              old.map((n) => ({ ...n, read_at: readAt })),
+                            );
+                          } catch (e) {
+                            setNotificationError((e as Error).message);
+                          }
                         }}
                       >
                         모두 읽음
                       </button>
                     </div>
+                    <ErrorNotice message={notificationError} />
                     {notifications.length ? (
                       notifications.map((n) => (
                         <Link

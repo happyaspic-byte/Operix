@@ -10,28 +10,44 @@ const id = (s: string) => {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 };
 const db = await getDb();
-const email = process.env.ADMIN_EMAIL?.trim().toLowerCase(),
-  password = process.env.ADMIN_PASSWORD;
-if (!email || !password || password.length < 12)
-  throw new Error(
-    "Set ADMIN_EMAIL and a unique ADMIN_PASSWORD of 12+ characters before seeding.",
+const earliestActiveAdmin = async () =>
+  (
+    await db.query(
+      "SELECT id FROM users WHERE role='admin' AND active AND deleted_at IS NULL AND privacy_erased_at IS NULL ORDER BY created_at,id LIMIT 1",
+    )
+  )[0];
+let admin = await earliestActiveAdmin();
+let bootstrapped = false;
+if (admin) console.log("Administrator already exists; bootstrap skipped.");
+else {
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase(),
+    password = process.env.ADMIN_PASSWORD;
+  if (!email || !password || password.length < 12)
+    throw new Error(
+      "Set ADMIN_EMAIL and a unique ADMIN_PASSWORD of 12+ characters before seeding.",
+    );
+  const hash = await hashPassword(password);
+  // The email may belong to an existing account; the check below reports it.
+  const inserted = await db.query(
+    "INSERT INTO users(id,email,name,role,password_hash,must_change_password) VALUES ($1,$2,'관리자','admin',$3,$4) ON CONFLICT DO NOTHING RETURNING id",
+    [
+      crypto.randomUUID(),
+      email,
+      hash,
+      ![
+        process.env.CI === "true",
+        process.env.OPERIX_EMBEDDED === "1",
+        process.env.OPERIX_CONTAINER_TEST === "1",
+      ].some(Boolean),
+    ],
   );
-const hash = await hashPassword(password),
-  adminId = id("admin");
-await db.query(
-  "INSERT INTO users(id,email,name,role,password_hash,must_change_password) VALUES ($1,$2,'관리자','admin',$3,$4) ON CONFLICT(email) DO NOTHING",
-  [
-    adminId,
-    email,
-    hash,
-    ![
-      process.env.CI === "true",
-      process.env.OPERIX_EMBEDDED === "1",
-      process.env.OPERIX_CONTAINER_TEST === "1",
-    ].some(Boolean),
-  ],
-);
-const [admin] = await db.query("SELECT * FROM users WHERE email=$1", [email]);
+  bootstrapped = inserted.length > 0;
+  admin = await earliestActiveAdmin();
+  if (!admin)
+    throw new Error(
+      "ADMIN_EMAIL belongs to an existing account that is not an active administrator. Choose another ADMIN_EMAIL.",
+    );
+}
 if (process.env.SEED_DEMO === "1") {
   const demoPassword = process.env.DEMO_PASSWORD;
   if (!demoPassword || demoPassword.length < 12)
@@ -296,7 +312,5 @@ if (process.env.SEED_DEMO === "1") {
     "Synthetic demonstration data seeded. No real customer data was used.",
   );
 }
-console.log(
-  "Administrator bootstrap completed; existing credentials were preserved.",
-);
+if (bootstrapped) console.log("Administrator bootstrap completed.");
 await db.close();

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readJson, failure } from "../src/lib/http.ts";
+import { readJson, readOptionalJson, failure } from "../src/lib/http.ts";
 import { AppError } from "../src/lib/policy.ts";
 
 // No database is used: these tests exercise the actual HTTP body boundary.
@@ -8,6 +8,12 @@ const limit = 1024 * 1024;
 function request(body: string) {
   return new Request("http://localhost/api/auth/login", {
     method: "POST",
+    body,
+  });
+}
+function patch(body?: string) {
+  return new Request("http://localhost/api/notifications", {
+    method: "PATCH",
     body,
   });
 }
@@ -95,6 +101,48 @@ test("Malformed and missing JSON retain a safe 400 response", async () => {
     assert.ok(!error.message.includes("synthetic"));
     return true;
   }
+});
+
+test("Optional JSON is null for a PATCH without a body or with an empty one, which readJson rejects", async () => {
+  const bodyless = patch();
+  assert.equal(bodyless.body, null);
+  assert.equal(await readOptionalJson(bodyless), null);
+  // Next.js hands route handlers a stream with zero bytes instead of null.
+  const empty = patch("");
+  assert.notEqual(empty.body, null);
+  assert.equal(await readOptionalJson(empty), null);
+  await assert.rejects(
+    () => readJson(patch("")),
+    (error: unknown) => error instanceof AppError && error.status === 400,
+  );
+});
+
+test("Optional JSON parses an object body", async () => {
+  assert.deepEqual(await readOptionalJson(patch('{"all":true}')), {
+    all: true,
+  });
+});
+
+test("Optional JSON keeps the readJson errors for non-empty bodies", async () => {
+  const oversized = JSON.stringify({ value: "x".repeat(limit - 11) });
+  assert.equal(Buffer.byteLength(oversized), limit + 1);
+  // Only zero bytes mean "no body"; whitespace and a JSON null stay errors.
+  for (const [body, status, message] of [
+    ["[]", 400, "JSON 객체를 전달해 주세요."],
+    ["null", 400, "JSON 객체를 전달해 주세요."],
+    ["{", 400, "올바른 JSON 객체가 필요합니다."],
+    [" ", 400, "올바른 JSON 객체가 필요합니다."],
+    [oversized, 413, "입력 데이터가 너무 큽니다."],
+  ] as const)
+    await assert.rejects(
+      () => readOptionalJson(patch(body)),
+      (error: unknown) => {
+        assert.ok(error instanceof AppError);
+        assert.equal(error.status, status);
+        assert.equal(error.message, message);
+        return true;
+      },
+    );
 });
 
 test("Oversized JSON maps to a safe 413 HTTP response", async () => {

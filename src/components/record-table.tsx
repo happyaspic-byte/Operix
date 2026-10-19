@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { ArrowUpRight, Server, Building2 } from "lucide-react";
-import { catalog, labels } from "@/lib/catalog";
+import { catalog, labelFor } from "@/lib/catalog";
 import { formatDate } from "@/lib/dates";
 import { Badge, Expiry, Empty } from "./ui";
 export function RecordTable({
@@ -125,7 +125,7 @@ export function RecordTable({
                     </>
                   ) : (
                     <span className={key === "asset_tag" ? "mono" : ""}>
-                      {labels[String(row[key])] ||
+                      {labelFor(String(row[key])) ||
                         String(row[key] ?? "—") ||
                         "—"}
                     </span>

@@ -63,3 +63,53 @@ test("oversized mutation cannot write data while ordinary Korean JSON still work
   expect(persisted.status()).toBe(200);
   expect((await persisted.json()).name).toBe(name);
 });
+
+test("entity routes named after inherited object keys show the not-found page", async ({
+  page,
+}) => {
+  const login = await page.request.post("/api/auth/login", {
+    headers: origin,
+    data: {
+      email: process.env.ADMIN_EMAIL,
+      password: process.env.ADMIN_PASSWORD,
+    },
+  });
+  expect(login.status()).toBe(200);
+  // The status stays 200 because (erp)/loading.tsx streams the response before
+  // notFound() runs, so assert on the rendered page instead.
+  for (const path of [
+    "/constructor",
+    "/toString",
+    "/constructor/00000000-0000-4000-8000-000000000000",
+  ]) {
+    await page.goto(path);
+    await expect(
+      page.getByRole("heading", { name: "페이지를 찾을 수 없습니다." }),
+      path,
+    ).toBeVisible();
+    await expect(
+      page.getByText("정보를 불러오지 못했습니다."),
+      path,
+    ).toHaveCount(0);
+  }
+});
+
+test("export kinds named after inherited object keys answer 404", async ({
+  request,
+}) => {
+  const login = await request.post("/api/auth/login", {
+    headers: origin,
+    data: {
+      email: process.env.ADMIN_EMAIL,
+      password: process.env.ADMIN_PASSWORD,
+    },
+  });
+  expect(login.status()).toBe(200);
+  for (const kind of ["constructor", "toString", "__proto__"]) {
+    const response = await request.get("/api/export/" + kind);
+    expect(response.status(), kind).toBe(404);
+    expect((await response.json()).error, kind).toBe(
+      "자료 유형을 찾을 수 없습니다.",
+    );
+  }
+});
