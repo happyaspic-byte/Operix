@@ -1,7 +1,7 @@
 "use client";
 import { createContext, useContext } from "react";
 import type { User } from "@/lib/auth";
-import { labels } from "@/lib/catalog";
+import { labelFor } from "@/lib/catalog";
 import { expiryLabel } from "@/lib/dates";
 export const UserContext = createContext<User | null>(null);
 export function useUser() {
@@ -49,7 +49,7 @@ export function Badge({ value, label }: { value: string; label?: string }) {
   return (
     <span className={`badge ${tone}`}>
       <i />
-      {label || labels[value] || value || "미확인"}
+      {label || labelFor(value) || value || "미확인"}
     </span>
   );
 }

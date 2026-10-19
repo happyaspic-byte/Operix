@@ -14,9 +14,10 @@ export async function GET(
   try {
     const u = await requireUser();
     requirePermission(u.role, "export");
-    const kind = (await params).kind,
-      config = catalog[kind];
-    if (!config) throw new AppError(404, "자료 유형을 찾을 수 없습니다.");
+    const kind = (await params).kind;
+    if (!Object.hasOwn(catalog, kind))
+      throw new AppError(404, "자료 유형을 찾을 수 없습니다.");
+    const config = catalog[kind];
     const db = await getDb();
     const query = new URL(request.url).searchParams;
     const rows = await db.transaction(async (tx) => {

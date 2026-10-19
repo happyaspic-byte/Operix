@@ -93,3 +93,23 @@ test("entity routes named after inherited object keys show the not-found page", 
     ).toHaveCount(0);
   }
 });
+
+test("export kinds named after inherited object keys answer 404", async ({
+  request,
+}) => {
+  const login = await request.post("/api/auth/login", {
+    headers: origin,
+    data: {
+      email: process.env.ADMIN_EMAIL,
+      password: process.env.ADMIN_PASSWORD,
+    },
+  });
+  expect(login.status()).toBe(200);
+  for (const kind of ["constructor", "toString", "__proto__"]) {
+    const response = await request.get("/api/export/" + kind);
+    expect(response.status(), kind).toBe(404);
+    expect((await response.json()).error, kind).toBe(
+      "자료 유형을 찾을 수 없습니다.",
+    );
+  }
+});

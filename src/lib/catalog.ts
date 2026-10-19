@@ -568,3 +568,8 @@ Object.assign(labels, {
   replacement_planned: "교체 계획",
   retired: "철수",
 });
+// Stored text can equal a key every object inherits ("constructor",
+// "__proto__"), so only own keys count as labels.
+export function labelFor(value: string): string | undefined {
+  return Object.hasOwn(labels, value) ? labels[value] : undefined;
+}
