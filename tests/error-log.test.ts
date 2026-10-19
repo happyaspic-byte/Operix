@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
+import ExcelJS from "exceljs";
 import { errorSummary } from "../src/lib/error-log.ts";
 import { failure } from "../src/lib/http.ts";
 import {
@@ -10,6 +12,7 @@ import {
   runMaintenanceJobs,
 } from "../src/lib/maintenance.ts";
 import { AppError } from "../src/lib/policy.ts";
+import { parseSheet } from "../src/lib/sheets.ts";
 import { isolatedDatabase } from "./helpers/isolated-db.ts";
 import { inDatabase, runScript } from "./helpers/script-db.ts";
 
@@ -64,9 +67,81 @@ test("errorSummary keeps database identifiers but never the message or row data"
 
 test("errorSummary cuts a message to 300 characters", () => {
   assert.equal(
-    String(errorSummary(new Error("x".repeat(1000))).message).length,
+    String(errorSummary(new RangeError("x".repeat(1000))).message).length,
     300,
   );
+});
+
+test("errorSummary keeps the message of programmer errors", () => {
+  for (const error of [
+    new TypeError("a is not a function"),
+    new RangeError("Invalid time value"),
+    new ReferenceError("b is not defined"),
+  ])
+    assert.equal(errorSummary(error).message, error.message);
+});
+
+test("errorSummary keeps the fixed connectivity messages of pg and pg-pool", () => {
+  for (const message of [
+    "timeout exceeded when trying to connect",
+    "Connection terminated due to connection timeout",
+    "Connection terminated unexpectedly",
+    "Connection terminated",
+    "Client has encountered a connection error and is not queryable",
+    "Client was closed and is not queryable",
+  ])
+    assert.equal(errorSummary(new Error(message)).message, message);
+  // Only the exact text: anything added to it could be data.
+  for (const message of [
+    "Connection terminated unexpectedly: kim@example.com",
+    "connection terminated unexpectedly",
+    " Connection terminated",
+  ])
+    assert.ok(!("message" in errorSummary(new Error(message))), message);
+});
+
+test("errorSummary logs no message for errors that can quote request data", async () => {
+  const quoting: unknown[] = [new Error("kim@example.com")];
+  quoting.push(new AppError(400, "kim@example.com"));
+  try {
+    JSON.parse("kim@example.com");
+  } catch (error) {
+    quoting.push(error);
+  }
+  // The error the CSV reader throws for an unterminated quote.
+  await new ExcelJS.Workbook().csv
+    .read(Readable.from(Buffer.from('name\n"open,kim@example.com\n')), {
+      map: (value: string) => value,
+    })
+    .catch((error: unknown) => quoting.push(error));
+  assert.equal(quoting.length, 4);
+  for (const error of quoting) {
+    // The premise: the error itself carries the address.
+    assert.match(String((error as Error).message), /kim@example\.com/);
+    const summary = errorSummary(error);
+    assert.ok(!("message" in summary));
+    assert.doesNotMatch(JSON.stringify(summary), /kim@example\.com/);
+    assert.equal(summary.name, (error as Error).name);
+    assert.match(String(summary.stack), /^at /);
+  }
+});
+
+test("a malformed CSV upload answers 400 and nothing from the file is logged", async (t) => {
+  const log = t.mock.method(console, "error", () => {});
+  const upload = new File(['name\n"open,kim@example.com\n'], "bad.csv");
+  let rejection: unknown;
+  await assert.rejects(parseSheet(upload), (error) => {
+    rejection = error;
+    return error instanceof AppError && error.status === 400;
+  });
+  assert.equal(
+    (rejection as Error).message,
+    "CSV 내용을 읽을 수 없습니다. 따옴표와 열 구분을 확인해 주세요.",
+  );
+  const response = failure(rejection);
+  assert.equal(response.status, 400);
+  assert.doesNotMatch(JSON.stringify(await response.json()), /kim@example/);
+  assert.equal(log.mock.callCount(), 0);
 });
 
 test("errorSummary keeps at most 8 trimmed frames and 1500 characters of stack", () => {

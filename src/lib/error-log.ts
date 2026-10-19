@@ -1,4 +1,18 @@
 const databaseFields = ["severity", "table", "column", "constraint", "routine"];
+// A message is logged only where it cannot quote request data: V8 words
+// programmer errors from code identifiers, and pg and pg-pool throw their
+// connectivity messages as fixed strings. Parsers and libraries echo their input
+// (a CSV reader quotes the rows it choked on), so for any other error the name,
+// code and frames locate the fault.
+const programmerErrors = new Set(["TypeError", "RangeError", "ReferenceError"]);
+const connectivityMessages = new Set([
+  "timeout exceeded when trying to connect",
+  "Connection terminated due to connection timeout",
+  "Connection terminated unexpectedly",
+  "Connection terminated",
+  "Client has encountered a connection error and is not queryable",
+  "Client was closed and is not queryable",
+]);
 
 // A getter that throws must not stop an error from being logged.
 function stringField(error: unknown, key: string): string | undefined {
@@ -38,12 +52,11 @@ function stackFrames(stack: string, message: string | undefined) {
 }
 
 // Safe to log: identifiers and frames only. A database message can quote the
-// offending value, so it is kept only for errors without a code.
+// offending value, so an error with a code never logs its message.
 export function errorSummary(error: unknown): Record<string, unknown> {
-  const summary: Record<string, unknown> = {
-    name:
-      stringField(error, "name") ?? (error === null ? "null" : typeof error),
-  };
+  const name =
+    stringField(error, "name") ?? (error === null ? "null" : typeof error);
+  const summary: Record<string, unknown> = { name };
   const code = stringField(error, "code");
   if (code) summary.code = code;
   for (const key of databaseFields) {
@@ -51,7 +64,12 @@ export function errorSummary(error: unknown): Record<string, unknown> {
     if (value) summary[key] = value;
   }
   const message = stringField(error, "message");
-  if (message && !code) summary.message = message.slice(0, 300);
+  if (
+    message &&
+    !code &&
+    (programmerErrors.has(name) || connectivityMessages.has(message))
+  )
+    summary.message = message.slice(0, 300);
   const stack = stringField(error, "stack");
   if (stack) {
     const trace = stackFrames(stack, message);
