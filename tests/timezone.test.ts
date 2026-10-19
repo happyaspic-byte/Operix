@@ -114,7 +114,7 @@ test("report document numbers carry the KST date and the id prefix", () => {
   );
 });
 
-test("a confirmed report is numbered with today's KST date", async () => {
+async function resolvedTicket() {
   const customer = await saveRecord("customers", admin, {
     name: "Report customer " + crypto.randomUUID(),
   });
@@ -127,13 +127,17 @@ test("a confirmed report is numbered with today's KST date", async () => {
     site_id: site.id,
     product: "Server",
   });
-  const ticket = await saveRecord("tickets", admin, {
+  return saveRecord("tickets", admin, {
     name: "Resolved ticket",
     customer_id: customer.id,
     asset_ids: [asset.id],
     status: "resolved",
     resolution: "Synthetic resolution",
   });
+}
+
+test("a confirmed report is numbered with today's KST date", async () => {
+  const ticket = await resolvedTicket();
   const report = await createReport(admin, {
     entity_kind: "tickets",
     entity_id: ticket.id,
@@ -143,4 +147,45 @@ test("a confirmed report is numbered with today's KST date", async () => {
     report.document_number,
     new RegExp(`^OPX-${todayKST().replaceAll("-", "")}-[0-9A-F]{8}$`),
   );
+});
+
+// The tests above compare with the wall clock and can only tell the UTC date
+// from the KST date between 15:00 and 24:00 UTC; these fix the clock.
+test("todayKST and the default report number follow the KST calendar across midnight", (t) => {
+  const id = "abcdef12-3456-4789-8abc-def012345678";
+  // 2026-10-18T15:30Z is 00:30 KST on the 19th, while UTC still says the 18th.
+  t.mock.timers.enable({
+    apis: ["Date"],
+    now: Date.parse("2026-10-18T15:30:00Z"),
+  });
+  assert.equal(todayKST(), "2026-10-19");
+  assert.match(reportDocumentNumber(id), /20261019/);
+  for (const [instant, date] of [
+    ["2026-10-18T14:59:59Z", "2026-10-18"],
+    ["2026-10-18T15:00:00Z", "2026-10-19"],
+    ["2026-10-19T14:59:00Z", "2026-10-19"],
+    ["2026-10-19T15:00:00Z", "2026-10-20"],
+  ]) {
+    t.mock.timers.setTime(Date.parse(instant));
+    assert.equal(todayKST(), date, instant);
+    assert.equal(
+      reportDocumentNumber(id),
+      `OPX-${date.replaceAll("-", "")}-ABCDEF12`,
+      instant,
+    );
+  }
+});
+
+test("a report confirmed at 00:30 KST is numbered with the KST date, not the UTC one", async (t) => {
+  const ticket = await resolvedTicket();
+  t.mock.timers.enable({
+    apis: ["Date"],
+    now: Date.parse("2026-10-18T15:30:00Z"),
+  });
+  const report = await createReport(admin, {
+    entity_kind: "tickets",
+    entity_id: ticket.id,
+    issue_reason: "Time zone verification",
+  });
+  assert.match(report.document_number, /^OPX-20261019-[0-9A-F]{8}$/);
 });
