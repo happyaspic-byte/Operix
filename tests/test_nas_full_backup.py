@@ -49,6 +49,7 @@ class FullBackupTests(unittest.TestCase):
     def run_script(self,name='backup.sh',**variables):
         return subprocess.run(['bash','scripts/'+name,str(self.root/'backups')],cwd=self.root,env={**self.env,**variables},capture_output=True,text=True,timeout=15)
     def commands(self): return self.log.read_text() if self.log.exists() else ''
+    def kept_backups(self): return list((self.root/'backups').glob('scheduled-*/operix-*/BACKUP_ID'))
     def test_overlapping_recovery_is_rejected_without_stopping_or_starting_writers(self):
         # Hold the same host lock as an in-progress backup or restore.
         with open(self.root/'.operix-recovery.lock','w') as lock:
@@ -78,6 +79,13 @@ class FullBackupTests(unittest.TestCase):
         self.assertEqual(result.returncode,23,result.stderr)
         self.assertIn('backup-complete',self.commands())
         self.assertNotIn('backup-replicated',self.commands())
+        # The local copy is kept even though the transfer failed.
+        self.assertEqual(len(self.kept_backups()),1)
+    def test_early_failure_leaves_no_empty_run_directory(self):
+        result=self.run_script('scheduled-backup.sh',FAIL_PS='1')
+        self.assertEqual(result.returncode,19,result.stderr)
+        self.assertEqual(list((self.root/'backups').glob('scheduled-*')),[])
+        self.assertNotIn('rsync ',self.commands())
     def test_malformed_receipt_is_reported_and_never_marks_remote_copy_successful(self):
         result=self.run_script('scheduled-backup.sh',MALFORM_RECEIPT='1')
         self.assertEqual(result.returncode,1,result.stderr)
@@ -89,4 +97,5 @@ class FullBackupTests(unittest.TestCase):
         log=self.commands()
         self.assertLess(log.index('rsync '),log.index('backup-replicated'))
         self.assertEqual(log.count('backup-replicated'),1)
+        self.assertEqual(len(self.kept_backups()),1)
 if __name__=='__main__':unittest.main()

@@ -9,6 +9,9 @@ command -v rsync >/dev/null
 # A per-run destination avoids selecting another process's backup files.
 mkdir -p "$BACKUP_ROOT"
 run_root=$(mktemp -d "$BACKUP_ROOT/scheduled-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")
+# An early backup.sh failure would otherwise leave an empty directory every run.
+# rmdir refuses a directory with files in it, so a run that made a backup keeps it.
+trap 'rmdir -- "$run_root" 2>/dev/null || true' EXIT
 bash scripts/backup.sh "$run_root"
 rsync --archive --checksum --mkpath --chmod=D700,F600 -- "$run_root/" "$BACKUP_REMOTE/"
 mapfile -t receipts < <(find "$run_root" -type f -name BACKUP_ID)
