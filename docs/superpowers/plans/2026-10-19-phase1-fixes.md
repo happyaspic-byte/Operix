@@ -16,7 +16,7 @@
 - Migrations inherit the app pool's `statement_timeout` 30s / `query_timeout` 35s, so a slow future migration fails every deploy; there is no lock against concurrent runs.
 - `scripts/seed.ts` runs on every internal-server deploy. If the bootstrap admin's email is changed, its fixed id collides (only `ON CONFLICT(email)` is handled) and migrate exits 1; `ADMIN_PASSWORD` must stay in `.env` forever.
 - "모두 읽음" in the notification panel always gets HTTP 400: Next 16 passes a non-null empty body for a body-less PATCH, so the route calls `readJson("")`. The click handler has no error handling.
-- Unexpected 500s and worker failures log no error name, message or stack; one failing maintenance job also skips the remaining ones.
+- Unexpected 500s and worker failures log no error name, message or stack (the fix logs name, code, database identifiers and frames, and a message only when it is one of pg's fixed strings, see Task 5); one failing maintenance job also skips the remaining ones.
 - `(erp)/error.tsx` uses `reset`, which in this Next version does not re-fetch, so "다시 시도" cannot recover from server errors. `/constructor`-style URLs pass the `!catalog[kind]` guard and show the error page instead of the not-found page (the app keeps HTTP 200 because `(erp)/loading.tsx` streams every page, so Task 6 Step 4 asserts the page, not the status). `tests/user-organization-privacy.test.ts` fails when `SESSION_SECRET` is unset.
 - Contract detail shows the customer name as "이전 계약"; component and VM detail show the raw asset UUID as "대상 자산".
 
@@ -160,21 +160,21 @@
 - Produces: `export function errorSummary(error: unknown): Record<string, unknown>` in `src/lib/error-log.ts`:
   - always `name` (the error's `name`, else `typeof` / `"null"`);
   - string `code` and the pg fields `severity`, `table`, `column`, `constraint`, `routine` when present;
-  - `message` (first 300 chars) only when the error has no `code` and is a `TypeError`, `RangeError` or `ReferenceError` or carries one of the fixed connectivity messages of pg and pg-pool (final review: parsers and libraries quote their input, so no other message is logged);
+  - `message` only when the error has no `code` and its text is exactly one of the fixed strings pg and pg-pool throw (`timeout exceeded when trying to connect`, `Connection terminated due to connection timeout`, `Connection terminated unexpectedly`, `Connection terminated`, `Client has encountered a connection error and is not queryable`, `Client was closed and is not queryable`, `Query read timeout`, `timeout expired`); every other error, programmer errors included, is located by its name, code and frames (final review: parsers and libraries quote their input, and V8 builds `TypeError` and `RangeError` text from templates that interpolate runtime values, e.g. `Cannot create property 'foo' on string '<value>'`);
   - `stack`: the stack lines after the first (the first repeats the message), at most 8, trimmed, joined by `\n`, capped at 1500 chars;
   - never `detail`, `hint`, `where`, `query`, `parameters`, `internalQuery`. Must not throw for any input.
 - Produces: `export async function runMaintenanceJobs(jobs: Array<[string, () => Promise<unknown>]>, log: (line: string) => void = console.error): Promise<string[]>` in `src/lib/maintenance.ts`: runs jobs in order, catches each failure, logs one JSON line `{ event: "operix.worker.job_failed", job, ...errorSummary(e) }`, continues, and returns the failed job names.
 
 - [ ] **Step 1: Write the failing tests:**
-  - `errorSummary(new TypeError("boom"))` → `name "TypeError"`, `message "boom"`, `stack` not containing `TypeError: boom`.
+  - `errorSummary(new TypeError("boom"))` → `name "TypeError"`, `stack` not containing `TypeError: boom`, and no `message` (final review); real V8 errors that quote a value (a strict-mode property set on the string `kim@example.com`, `undefined["kim@example.com"]`, `new Map(["kim@example.com"])`, an invalid `timeZone`) log no part of it, while `name` and the frames remain. The eight fixed pg messages keep their `message`; the same text with anything added, or on an error with a `code`, does not.
   - A pg-like `Error` with `code "23505"`, `detail "Key (email)=(a@b.c) already exists."`, `table "users"`, `constraint "users_email_key"`, `severity "ERROR"` → those fields present, no `message`, and `JSON.stringify(result)` does not contain `a@b.c`.
-  - A 1000-char `RangeError` message → `message.length === 300`. Inputs `"x"`, `null` and `{}` return an object with `name` and do not throw.
-  - `failure(new TypeError("boom"))` with `console.error` stubbed: one JSON log line with `event "operix.request.failed"`, `request_id`, `name`, `message`; response status 500. `failure(new AppError(400, "x"))` logs nothing.
+  - A 1000-char `RangeError` message → no `message` (it was cut to 300 characters before the final review limited messages to the fixed pg strings). Inputs `"x"`, `null` and `{}` return an object with `name` and do not throw.
+  - `failure(new TypeError("boom"))` with `console.error` stubbed: one JSON log line with `event "operix.request.failed"`, `request_id`, `name`, `stack`, no `message`; response status 500. `failure(new AppError(400, "x"))` logs nothing.
   - `runMaintenanceJobs([["a", ok], ["b", throws], ["c", ok]], log)` → returns `["b"]`, `a` and `c` both ran, `log` called once with `job: "b"`.
 
 - [ ] **Step 2: Run to verify failure:** `node --import tsx --test tests/error-log.test.ts`.
 
-- [ ] **Step 3: Implement.** In `failure()`, the unexpected-error log becomes `{ event: "operix.request.failed", request_id, ...errorSummary(error), code: code || "internal_error" }`; the existing 55P03/23505/23503 and `AppError` branches stay unchanged. `scripts/worker.ts` runs `runJobs`, `purgeDeletedFiles` and `scanPendingDocuments` through `runMaintenanceJobs`: when none failed, keep the existing success update and log; when any failed, set `last_error` to `maintenance_failed:<names joined by ",">`, `heartbeat_at=now()`, `started_at=NULL`, leave `last_success` untouched, and set `process.exitCode = 1` with `--once`.
+- [ ] **Step 3: Implement.** In `failure()`, the unexpected-error log becomes `{ event: "operix.request.failed", request_id, ...errorSummary(error), code: code || "internal_error" }`; the existing 55P03/23505/23503 and `AppError` branches stay unchanged. *Later (final review B5): the 55P03 branch logs exactly one `{ event: "operix.request.lock_timeout", request_id }` line before its unchanged 503 response; 23505, 23503 and `AppError` stay silent.* `scripts/worker.ts` runs `runJobs`, `purgeDeletedFiles` and `scanPendingDocuments` through `runMaintenanceJobs`: when none failed, keep the existing success update and log; when any failed, set `last_error` to `maintenance_failed:<names joined by ",">`, `heartbeat_at=now()`, `started_at=NULL`, leave `last_success` untouched, and set `process.exitCode = 1` with `--once`.
 
 - [ ] **Step 4: Verify** the focused test and the Global Constraints checks.
 
