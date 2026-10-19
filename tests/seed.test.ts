@@ -218,7 +218,10 @@ test("seeding bootstraps an administrator when the only admins are deleted or er
       result.stdout,
     );
     assert.doesNotMatch(result.stdout, /bootstrap skipped/);
-    const { rows } = await inDatabase((db) => db.query(activeAdmins), fresh);
+    const { rows } = await inDatabase(
+      (db) => db.query<{ email: string }>(activeAdmins),
+      fresh,
+    );
     assert.deepEqual(
       rows.map((row) => row.email),
       [bootstrap.ADMIN_EMAIL],
