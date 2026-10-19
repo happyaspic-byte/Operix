@@ -90,7 +90,7 @@ jobs:
           node -e 'require("fs").writeFileSync("test-results/revision.json",JSON.stringify({revision:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,run_attempt:process.env.GITHUB_RUN_ATTEMPT},null,2))'
       - name: Upload verification evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: operix-verification
           include-hidden-files: true
@@ -195,7 +195,7 @@ jobs:
           github.repository == 'happyaspic-byte/Operix' &&
           github.ref == 'refs/heads/main' &&
           (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: operix-nas-image
           path: |
