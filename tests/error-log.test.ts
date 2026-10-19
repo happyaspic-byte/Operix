@@ -38,10 +38,10 @@ function databaseError(
   });
 }
 
-test("errorSummary names a plain error and shows its message and frames", () => {
+test("errorSummary names a plain error and shows its frames but not its message", () => {
   const summary = errorSummary(new TypeError("boom"));
   assert.equal(summary.name, "TypeError");
-  assert.equal(summary.message, "boom");
+  assert.ok(!("message" in summary));
   // The first stack line repeats the message, so the frames start after it.
   assert.match(String(summary.stack), /^at /);
   assert.doesNotMatch(String(summary.stack), /TypeError: boom/);
@@ -65,23 +65,56 @@ test("errorSummary keeps database identifiers but never the message or row data"
   assert.doesNotMatch(JSON.stringify(summary), /a@b\.c/);
 });
 
-test("errorSummary cuts a message to 300 characters", () => {
-  assert.equal(
-    String(errorSummary(new RangeError("x".repeat(1000))).message).length,
-    300,
-  );
-});
-
-test("errorSummary keeps the message of programmer errors", () => {
+test("errorSummary logs no message for programmer errors", () => {
   for (const error of [
     new TypeError("a is not a function"),
     new RangeError("Invalid time value"),
     new ReferenceError("b is not defined"),
-  ])
-    assert.equal(errorSummary(error).message, error.message);
+    // However long, a message that is not logged cannot flood the log.
+    new RangeError("x".repeat(1000)),
+  ]) {
+    const summary = errorSummary(error);
+    assert.ok(!("message" in summary), error.name);
+    assert.equal(summary.name, error.name);
+    assert.match(String(summary.stack), /^at /);
+  }
 });
 
-test("errorSummary keeps the fixed connectivity messages of pg and pg-pool", () => {
+test("errorSummary logs no message for V8 errors that quote a runtime value", () => {
+  const raised: Error[] = [];
+  for (const raise of [
+    // Modules are strict, so setting a property on a primitive throws.
+    () => {
+      const value = "kim@example.com";
+      (value as any).foo = 1;
+    },
+    () => (undefined as any)["kim@example.com"],
+    () => new Map(["kim@example.com"] as any),
+    () => new Intl.DateTimeFormat("en", { timeZone: "kim@example.com" }),
+  ]) {
+    try {
+      raise();
+    } catch (error) {
+      raised.push(error as Error);
+    }
+  }
+  assert.deepEqual(
+    raised.map((error) => error.name),
+    ["TypeError", "TypeError", "TypeError", "RangeError"],
+  );
+  for (const error of raised) {
+    // The premise: V8 put the address into the message itself.
+    assert.match(error.message, /kim@example\.com/);
+    const summary = errorSummary(error);
+    assert.ok(!("message" in summary), error.message);
+    assert.doesNotMatch(JSON.stringify(summary), /kim@|@example\.com/);
+    assert.equal(summary.name, error.name);
+    // The frames still say where it happened.
+    assert.match(String(summary.stack), /^at /);
+  }
+});
+
+test("errorSummary keeps the fixed messages of pg and pg-pool", () => {
   for (const message of [
     "timeout exceeded when trying to connect",
     "Connection terminated due to connection timeout",
@@ -89,6 +122,8 @@ test("errorSummary keeps the fixed connectivity messages of pg and pg-pool", () 
     "Connection terminated",
     "Client has encountered a connection error and is not queryable",
     "Client was closed and is not queryable",
+    "Query read timeout",
+    "timeout expired",
   ])
     assert.equal(errorSummary(new Error(message)).message, message);
   // Only the exact text: anything added to it could be data.
@@ -96,8 +131,18 @@ test("errorSummary keeps the fixed connectivity messages of pg and pg-pool", () 
     "Connection terminated unexpectedly: kim@example.com",
     "connection terminated unexpectedly",
     " Connection terminated",
+    "Query read timeout: SELECT 'kim@example.com'",
+    "timeout expired ",
   ])
     assert.ok(!("message" in errorSummary(new Error(message))), message);
+  // An error that carries a code is described by the code instead.
+  const coded = Object.assign(new Error("Connection terminated"), {
+    code: "57P01",
+  });
+  assert.deepEqual(
+    { ...errorSummary(coded), stack: undefined },
+    { name: "Error", code: "57P01", stack: undefined },
+  );
 });
 
 test("errorSummary logs no message for errors that can quote request data", async () => {
@@ -208,7 +253,7 @@ test("errorSummary falls back to the first frame when the stack does not carry t
   void error.stack;
   error.message = "new";
   const summary = errorSummary(error);
-  assert.equal(summary.message, "new");
+  assert.ok(!("message" in summary));
   assert.match(String(summary.stack), /^at /);
   assert.doesNotMatch(String(summary.stack), /old (one|two)/);
   // A message found only further down is not the header.
@@ -276,15 +321,15 @@ test("errorSummary summarises any value by type without throwing", () => {
   const revoked = Proxy.revocable({}, {});
   revoked.revoke();
   assert.deepEqual(errorSummary(revoked.proxy), { name: "object" });
-  const brokenStack = new RangeError("late");
+  const brokenStack = new Error("Connection terminated");
   Object.defineProperty(brokenStack, "stack", {
     get() {
       throw new Error("stack");
     },
   });
   assert.deepEqual(errorSummary(brokenStack), {
-    name: "RangeError",
-    message: "late",
+    name: "Error",
+    message: "Connection terminated",
   });
 });
 
@@ -298,7 +343,8 @@ test("an unexpected failure logs its cause once and answers with a generic 500",
   assert.equal(line.event, "operix.request.failed");
   assert.equal(line.request_id, body.request_id);
   assert.equal(line.name, "TypeError");
-  assert.equal(line.message, "boom");
+  assert.ok(!("message" in line));
+  assert.match(String(line.stack), /^at /);
   assert.equal(line.code, "internal_error");
   assert.doesNotMatch(JSON.stringify(body), /boom/);
 });

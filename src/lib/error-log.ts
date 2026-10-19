@@ -1,17 +1,18 @@
 const databaseFields = ["severity", "table", "column", "constraint", "routine"];
-// A message is logged only where it cannot quote request data: V8 words
-// programmer errors from code identifiers, and pg and pg-pool throw their
-// connectivity messages as fixed strings. Parsers and libraries echo their input
-// (a CSV reader quotes the rows it choked on), so for any other error the name,
-// code and frames locate the fault.
-const programmerErrors = new Set(["TypeError", "RangeError", "ReferenceError"]);
-const connectivityMessages = new Set([
+// A message is logged only when it is one of the fixed strings pg and pg-pool
+// throw for connection and timeout failures. Any other message can quote data:
+// V8 builds TypeError and RangeError text from templates that interpolate
+// runtime values, and parsers and libraries echo their input. Every other error
+// is located by its name, code and frames.
+const fixedMessages = new Set([
   "timeout exceeded when trying to connect",
   "Connection terminated due to connection timeout",
   "Connection terminated unexpectedly",
   "Connection terminated",
   "Client has encountered a connection error and is not queryable",
   "Client was closed and is not queryable",
+  "Query read timeout",
+  "timeout expired",
 ]);
 
 // A getter that throws must not stop an error from being logged.
@@ -68,12 +69,7 @@ export function errorSummary(error: unknown): Record<string, unknown> {
     if (value) summary[key] = value;
   }
   const message = stringField(error, "message");
-  if (
-    message &&
-    !code &&
-    (programmerErrors.has(name) || connectivityMessages.has(message))
-  )
-    summary.message = message.slice(0, 300);
+  if (message && !code && fixedMessages.has(message)) summary.message = message;
   const stack = stringField(error, "stack");
   if (stack) {
     const trace = stackFrames(stack, message);
