@@ -29,7 +29,11 @@ async function migrationNames() {
 
 // Stands in for PostgreSQL: pg clients never connect, every statement is
 // recorded, and schema_migrations is answered from the name -> checksum ledger.
-function fakePostgres(t: TestContext, ledger = new Map<string, string>()) {
+function fakePostgres(
+  t: TestContext,
+  ledger = new Map<string, string>(),
+  failing = new Map<string, Error>(),
+) {
   const previous = process.env.DATABASE_URL;
   process.env.DATABASE_URL = postgresUrl;
   t.after(() => {
@@ -47,6 +51,8 @@ function fakePostgres(t: TestContext, ledger = new Map<string, string>()) {
     async function (this: Client, sql: string, params: unknown[] = []) {
       clients.add(this);
       sent.push(params.length ? `${sql} ${JSON.stringify(params)}` : sql);
+      const error = failing.get(sql);
+      if (error) throw error;
       if (sql.startsWith("SELECT checksum FROM schema_migrations")) {
         const checksum = ledger.get(String(params[0]));
         return { rows: checksum ? [{ checksum }] : [] };
@@ -69,12 +75,31 @@ function fakePostgres(t: TestContext, ledger = new Map<string, string>()) {
   t.mock.method(Client.prototype, "end", async function (this: Client) {
     clients.add(this);
     sent.push("end");
+    const error = failing.get("end");
+    if (error) throw error;
   });
   return { clients, sent, ledger };
 }
 
 const applied = (lines: string[]) =>
   lines.filter((line) => line.startsWith("Applied "));
+
+test("the migration client takes the connection string as pg parses it", () => {
+  for (const [connectionString, password, options] of [
+    ["postgresql://operix:p%ssw0rd!@db:5432/operix", "p%ssw0rd!", undefined],
+    [
+      "postgresql://u:p@db:5432/operix?options=-c%20search_path%3Dtest_schema&sslmode=disable",
+      "p",
+      "-c search_path=test_schema",
+    ],
+  ] as const) {
+    const parameters = (
+      new Client(migrationClientConfig(connectionString)) as any
+    ).connectionParameters;
+    assert.equal(parameters.password, password);
+    assert.equal(parameters.options, options);
+  }
+});
 
 test("the migration client config leaves out the pool's request timeouts", () => {
   const config = migrationClientConfig(postgresUrl);
@@ -123,6 +148,26 @@ test("the PostgreSQL migration connection is one client with explicit transactio
   assert.equal(parameters.lock_timeout, 60000);
   assert.ok(!parameters.statement_timeout);
   assert.ok(!parameters.query_timeout);
+});
+
+test("a failing session setup ends the migration client and rethrows the original error", async (t) => {
+  const failing = new Map<string, Error>();
+  const { sent } = fakePostgres(t, new Map(), failing);
+  for (const [index, statement] of sessionSetup.entries()) {
+    const error = new Error(`${statement} failed`);
+    failing.clear();
+    failing.set(statement, error);
+    sent.length = 0;
+    await assert.rejects(connectForMigrations(), (thrown) => thrown === error);
+    // The client is ended right after the failing statement, once.
+    assert.deepEqual(sent, [...sessionSetup.slice(0, index + 1), "end"]);
+
+    // A client that cannot even end does not hide the cause.
+    failing.set("end", new Error("end failed"));
+    sent.length = 0;
+    await assert.rejects(connectForMigrations(), (thrown) => thrown === error);
+    assert.deepEqual(sent, [...sessionSetup.slice(0, index + 1), "end"]);
+  }
 });
 
 test("on PostgreSQL migrate locks the whole run and a changed migration still fails", async (t) => {

@@ -1,5 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { Client } from "pg";
 import { isolatedDatabase } from "./helpers/isolated-db.ts";
 import {
   applySessionTimeZone,
@@ -44,7 +45,10 @@ test("the session time zone is set with one Asia/Seoul statement", async () => {
 });
 
 test("the pool config sets the Asia/Seoul session on connect and leaves the connection string alone", () => {
-  for (const connectionString of [malformedEscapeUrl, urlWithOptions])
+  for (const [connectionString, password, options] of [
+    [malformedEscapeUrl, "p%ssw0rd!", undefined],
+    [urlWithOptions, "p", "-c search_path=test_schema"],
+  ] as const) {
     assert.deepEqual(poolConfig(connectionString), {
       connectionString,
       max: 8,
@@ -54,6 +58,13 @@ test("the pool config sets the Asia/Seoul session on connect and leaves the conn
       query_timeout: 35000,
       onConnect: applySessionTimeZone,
     });
+    // What pg makes of it: the password stays whole and the URL's own options
+    // are the only ones sent.
+    const parameters = (new Client(poolConfig(connectionString)) as any)
+      .connectionParameters;
+    assert.equal(parameters.password, password);
+    assert.equal(parameters.options, options);
+  }
 });
 
 test("the database session time zone is Asia/Seoul", async () => {

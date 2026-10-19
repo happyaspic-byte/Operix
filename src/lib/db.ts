@@ -134,8 +134,13 @@ export async function connectForMigrations(): Promise<Database> {
   if (!process.env.DATABASE_URL) return getDb();
   const client = new Client(migrationClientConfig(process.env.DATABASE_URL));
   await client.connect();
-  await applySessionTimeZone(client);
-  await client.query("SET statement_timeout = 0");
+  try {
+    await applySessionTimeZone(client);
+    await client.query("SET statement_timeout = 0");
+  } catch (error) {
+    await client.end().catch(() => {});
+    throw error;
+  }
   const db: Database = {
     query: async (sql, params = []) =>
       normalize((await client.query(sql, params)).rows) as any,
