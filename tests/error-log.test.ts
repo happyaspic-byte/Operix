@@ -230,6 +230,21 @@ test("errorSummary logs no frames when a multi-line message cannot be found in t
   assert.deepEqual(summary, { name: "error", code: "22P02" });
   assert.ok(!("stack" in summary));
   assert.doesNotMatch(JSON.stringify(summary), /secret@x\.y/);
+
+  // A prefix in front of the message in the header does not hide it.
+  const prefixed = Object.assign(new Error(quoted), {
+    name: "error",
+    code: "22P02",
+  });
+  prefixed.stack = [
+    `Error: while saving: ${quoted}`,
+    "    at frame0 (app.ts:1:1)",
+  ].join("\n");
+  assert.deepEqual(errorSummary(prefixed), {
+    name: "error",
+    code: "22P02",
+    stack: "at frame0 (app.ts:1:1)",
+  });
 });
 
 test("errorSummary summarises any value by type without throwing", () => {
