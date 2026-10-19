@@ -15,7 +15,9 @@ name=Path(sys.argv[0]).name
 args=sys.argv[1:]
 with open(os.environ['COMMAND_LOG'],'a') as log: log.write(name+' '+' '.join(args)+'\n')
 if name=='docker':
-    if 'ps' in args: print(os.environ.get('RUNNING_SERVICES','web\nworker'))
+    if 'ps' in args:
+        if os.environ.get('FAIL_PS'): sys.exit(19)
+        print(os.environ.get('RUNNING_SERVICES','web\nworker'))
     if 'manifest' in args:
         if os.environ.get('FAIL_MANIFEST'): sys.exit(17)
         print('{}')
@@ -24,7 +26,10 @@ if name=='docker':
     if 'backup-start' in args and os.environ.get('FAIL_START'): sys.exit(18)
 if name=='age':
     Path(args[args.index('-o')+1]).write_bytes(sys.stdin.buffer.read())
-if name=='rsync': sys.exit(int(os.environ.get('RSYNC_EXIT','0')))
+if name=='rsync':
+    if os.environ.get('MALFORM_RECEIPT'):
+        for receipt in Path(args[-2]).rglob('BACKUP_ID'): receipt.write_text('not-a-uuid\n')
+    sys.exit(int(os.environ.get('RSYNC_EXIT','0')))
 '''
 class FullBackupTests(unittest.TestCase):
     def setUp(self):
@@ -55,6 +60,13 @@ class FullBackupTests(unittest.TestCase):
         result=self.run_script(FAIL_START='1',RUNNING_SERVICES='')
         self.assertNotEqual(result.returncode,0)
         self.assertNotIn('compose start',self.commands())
+    def test_status_check_failure_leaves_no_backup_directory_behind(self):
+        stage=self.root/'stage'; stage.mkdir()
+        result=self.run_script(FAIL_PS='1',TMPDIR=str(stage))
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual(list((self.root/'backups').glob('operix-*')),[])
+        self.assertEqual(list(stage.iterdir()),[])
+        self.assertNotIn('backup-start',self.commands())
     def test_backup_failure_resumes_only_previously_running_services(self):
         result=self.run_script(FAIL_MANIFEST='1',RUNNING_SERVICES='web')
         self.assertNotEqual(result.returncode,0)
@@ -65,6 +77,11 @@ class FullBackupTests(unittest.TestCase):
         result=self.run_script('scheduled-backup.sh',RSYNC_EXIT='23')
         self.assertEqual(result.returncode,23,result.stderr)
         self.assertIn('backup-complete',self.commands())
+        self.assertNotIn('backup-replicated',self.commands())
+    def test_malformed_receipt_is_reported_and_never_marks_remote_copy_successful(self):
+        result=self.run_script('scheduled-backup.sh',MALFORM_RECEIPT='1')
+        self.assertEqual(result.returncode,1,result.stderr)
+        self.assertIn('Backup receipt id is malformed.',result.stderr)
         self.assertNotIn('backup-replicated',self.commands())
     def test_success_records_remote_copy_only_after_transfer(self):
         result=self.run_script('scheduled-backup.sh')

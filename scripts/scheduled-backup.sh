@@ -14,6 +14,6 @@ rsync --archive --checksum --mkpath --chmod=D700,F600 -- "$run_root/" "$BACKUP_R
 mapfile -t receipts < <(find "$run_root" -type f -name BACKUP_ID)
 [[ ${#receipts[@]} == 1 ]] || { printf 'Expected exactly one backup receipt.\n' >&2; exit 1; }
 backup_id=$(cat "${receipts[0]}")
-[[ "$backup_id" =~ ^[a-f0-9-]{36}$ ]] || exit 1
+[[ "$backup_id" =~ ^[a-f0-9-]{36}$ ]] || { printf 'Backup receipt id is malformed.\n' >&2; exit 1; }
 docker compose run --rm --no-deps web node --import tsx scripts/recovery.ts backup-replicated "$backup_id" >/dev/null
 printf 'Encrypted backup copied successfully to the configured remote.\n'

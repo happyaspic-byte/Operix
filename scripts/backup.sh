@@ -8,6 +8,10 @@ if [[ -z "${BACKUP_AGE_RECIPIENT:-}" && "${OPERIX_CONTAINER_TEST:-}" != "1" ]]; 
   exit 1
 fi
 if [[ -n "${BACKUP_AGE_RECIPIENT:-}" ]]; then command -v age >/dev/null; fi
+# Before anything is created, so a failing status check leaves no debris.
+running_output=$(docker compose ps --status running --services web worker)
+running_writers=()
+if [[ -n "$running_output" ]]; then mapfile -t running_writers <<< "$running_output"; fi
 mkdir -p "$backup_root"
 backup_dir="$backup_root/operix-$(date -u +%Y%m%dT%H%M%SZ)-$RANDOM"
 mkdir "$backup_dir"
@@ -15,9 +19,6 @@ backup_stage=$(mktemp -d)
 backup_id=$(cat /proc/sys/kernel/random/uuid)
 backup_ok=0
 writers_stopped=0
-running_output=$(docker compose ps --status running --services web worker)
-running_writers=()
-if [[ -n "$running_output" ]]; then mapfile -t running_writers <<< "$running_output"; fi
 cleanup() {
   rm -rf -- "$backup_stage"
   if [[ "$backup_ok" == 0 ]]; then docker compose run --rm --no-deps web node --import tsx scripts/recovery.ts backup-failed "$backup_id" >/dev/null || true; fi
