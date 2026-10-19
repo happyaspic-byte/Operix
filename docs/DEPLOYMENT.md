@@ -13,10 +13,12 @@ cp .env.example .env
 chmod 600 .env
 # 아래 값을 각각 독립된 난수/회사 값으로 설정한다.
 nano .env
-docker compose up --build -d
+GITHUB_SHA=$(git rev-parse HEAD) docker compose up --build -d
 docker compose ps
 docker compose logs --tail=80 migrate web worker scanner
 ```
+
+`GITHUB_SHA`는 빌드한 커밋을 이미지에 넣어 `/api/health`의 `revision`이 실제 커밋을 가리키게 한다. 지정하지 않으면 `development`로 표시되어 40자리 커밋 SHA를 요구하는 `scripts/verify-deployment.mjs`가 실패한다. 이후 `docker compose build`나 `up --build`를 다시 실행할 때도 같은 방식으로 지정한다.
 
 | 변수 | 운영 값 |
 | --- | --- |
@@ -24,14 +26,17 @@ docker compose logs --tail=80 migrate web worker scanner
 | SESSION_SECRET | 독립된 32자 이상 난수 |
 | SECURITY_LOG_KEY | 세션 키와 다른 32자 이상 난수. 로그·파기 원장의 검증에 필요 |
 | POSTGRES_PASSWORD | 독립된 비밀번호. 내부 연결 URL을 위해 hex 난수 권장 |
-| ADMIN_EMAIL / ADMIN_PASSWORD | 최초 관리자, 최소 12자 초기 비밀번호. 첫 관리자가 생성될 때까지만 필요하며, 이후 `.env`에서 제거할 수 있다. 다만 NAS Portainer 템플릿(`deploy/nas/compose.template.json`)은 두 변수를 여전히 요구하므로 그 배포에서는 유지한다 |
+| ADMIN_EMAIL / ADMIN_PASSWORD | 최초 관리자, 최소 12자 초기 비밀번호. 첫 관리자가 생성될 때까지만 필요하며, 이후 `.env`에서 제거할 수 있다. NAS Portainer 템플릿(`deploy/nas/compose.template.json`)의 `migrate` 서비스는 seed를 실행하지 않고(`prepare-storage`와 `migrate`만 수행) 관리자도 만들지 않으므로, 새 NAS 스택의 첫 관리자는 별도 절차로 만든다. 그 배포에서 두 변수가 계속 필요한 것은 템플릿이 두 변수를 치환하기 때문일 뿐이다 |
 | SEED_DEMO | `0` |
 | FILE_SCAN_MODE | `clamav` |
 | TRUST_PROXY_HEADERS | 승인된 프록시가 클라이언트 헤더를 덮어쓸 때만 `1` |
 | SESSION_IDLE_MINUTES | 회사 정책에 따른 5~480분, 기본 30분 |
 | UPLOAD_STORAGE_LIMIT_MB | 저장량 한도, 기본 10240MB |
 | BACKUP_REQUIRED | 예약 백업·경보를 설치하고 확인한 뒤 `1` |
+| BACKUP_REMOTE_REQUIRED | 외부 복사까지 확인한 뒤 `1`, 기본 `0`. 켜면 `BACKUP_MAX_AGE_HOURS` 안에 외부 복사된 암호화 백업이 없을 때 readiness가 실패한다 |
 | BACKUP_MAX_AGE_HOURS | 백업 지연 readiness 기준, 기본 26시간 |
+
+`BACKUP_REQUIRED` 또는 `BACKUP_REMOTE_REQUIRED`가 `1`일 때 백업이 `BACKUP_MAX_AGE_HOURS`보다 오래되면 `/api/health`가 503을 반환한다. 이 주소는 컨테이너 health check이기도 하므로 재배포한 web이 healthy가 되지 못해 배포가 끝나지 않는다. NAS에서는 `https`와 `deployment-check`가 web의 healthy 상태에 의존한다. 백업을 복구하는 동안 배포해야 하면 해당 값을 `0`으로 바꿔 배포하고, 백업이 정상으로 돌아오면 다시 `1`로 켠다.
 
 `openssl rand -hex 48`을 필요한 키마다 별도로 실행해 생성할 수 있다. 실제 키를 Git에 넣지 않는다. Compose는 내부 DATABASE_URL을 구성하며 DB/스캐너 포트는 호스트에 노출하지 않는다. 웹은 127.0.0.1:3000에 연결된다.
 
@@ -66,7 +71,7 @@ NAS의 자동 갱신은 [Portainer Repository 자동배포](../deploy/nas/README
 
 ```bash
 docker compose stop web worker
-docker compose build
+GITHUB_SHA=$(git rev-parse HEAD) docker compose build
 docker compose run --rm migrate
 docker compose up -d web worker scanner
 ```
