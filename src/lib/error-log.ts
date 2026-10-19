@@ -37,13 +37,17 @@ function headerLines(stack: string, message: string | undefined) {
 
 function stackFrames(stack: string, message: string | undefined) {
   const lines = stack.split("\n");
-  // Without the message in the header, the first "at " line opens the frames.
-  const start =
-    headerLines(stack, message) ??
-    Math.max(
+  let start = headerLines(stack, message);
+  if (start === undefined) {
+    // A multi-line message the stack does not carry may have quoted a line
+    // that starts with "at ", which the fallback below would take for a frame.
+    if (message?.includes("\n")) return "";
+    // Without the message in the header, the first "at " line opens the frames.
+    start = Math.max(
       1,
       lines.findIndex((line) => /^\s*at\s/.test(line)),
     );
+  }
   return lines
     .slice(start, start + 8)
     .map((line) => line.trim())

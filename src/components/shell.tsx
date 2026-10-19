@@ -360,11 +360,9 @@ export function Shell({
                             });
                             setNotificationError("");
                             setUnreadTotal(0);
+                            const readAt = new Date().toISOString();
                             setNotifications((old) =>
-                              old.map((n) => ({
-                                ...n,
-                                read_at: new Date().toISOString(),
-                              })),
+                              old.map((n) => ({ ...n, read_at: readAt })),
                             );
                           } catch (e) {
                             setNotificationError((e as Error).message);

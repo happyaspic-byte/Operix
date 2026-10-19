@@ -162,7 +162,7 @@ test("errorSummary does not let a multi-line database message into the stack", (
   const error = databaseError("22007", 'bad date: "2026-01\nsecret-c@d.e"');
   assert.match(String(error.stack), /secret-c@d\.e/);
   const logged = JSON.stringify(errorSummary(error));
-  assert.doesNotMatch(logged, /secret|c@d\.e/);
+  assert.doesNotMatch(logged, /secret-c@d\.e|bad date/);
   assert.match(logged, /"code":"22007"/);
 });
 
@@ -210,11 +210,26 @@ test("errorSummary falls back to the first frame when the stack does not carry t
   const summary = errorSummary(error);
   assert.equal(summary.message, "new");
   assert.match(String(summary.stack), /^at /);
-  assert.doesNotMatch(String(summary.stack), /old/);
+  assert.doesNotMatch(String(summary.stack), /old (one|two)/);
   // A message found only further down is not the header.
   error.stack = "TypeError: old one\nold two\n    at frame0 (app.ts:1:1)";
   error.message = "frame0";
   assert.equal(errorSummary(error).stack, "at frame0 (app.ts:1:1)");
+});
+
+test("errorSummary logs no frames when a multi-line message cannot be found in the stack", () => {
+  const quoted = 'invalid input syntax for type uuid: "line1\nat secret@x.y"';
+  const error = Object.assign(new Error("while saving: " + quoted), {
+    name: "error",
+    code: "22P02",
+  });
+  // The header carries the message as it was before something prefixed it, so
+  // the "at " line inside the quoted value would pass for the first frame.
+  error.stack = [`Error: ${quoted}`, "    at frame0 (app.ts:1:1)"].join("\n");
+  const summary = errorSummary(error);
+  assert.deepEqual(summary, { name: "error", code: "22P02" });
+  assert.ok(!("stack" in summary));
+  assert.doesNotMatch(JSON.stringify(summary), /secret@x\.y/);
 });
 
 test("errorSummary summarises any value by type without throwing", () => {
@@ -401,9 +416,12 @@ const fallbackUpdate =
 test("recordMaintenanceOutcome records a clean pass with its duration", async () => {
   const db = statusDb();
   const lines: string[] = [];
-  await recordMaintenanceOutcome(db, { failed: [], durationMs: 1234 }, (line) =>
-    lines.push(line),
+  const recorded = await recordMaintenanceOutcome(
+    db,
+    { failed: [], durationMs: 1234 },
+    (line) => lines.push(line),
   );
+  assert.equal(recorded, true);
   assert.equal(db.calls.length, 1);
   const [{ sql, params }] = db.calls;
   for (const part of [
@@ -429,7 +447,10 @@ test("recordMaintenanceOutcome names the failed jobs and leaves the last success
   ];
   for (const [failed, lastError] of cases) {
     const db = statusDb();
-    await recordMaintenanceOutcome(db, { failed, durationMs: 9 }, () => {});
+    assert.equal(
+      await recordMaintenanceOutcome(db, { failed, durationMs: 9 }, () => {}),
+      true,
+    );
     assert.equal(db.calls.length, 1);
     const [{ sql, params }] = db.calls;
     for (const part of [
@@ -447,9 +468,13 @@ test("recordMaintenanceOutcome names the failed jobs and leaves the last success
 test("recordMaintenanceOutcome logs a failed status update, tries the fallback and still resolves", async () => {
   const db = statusDb(1);
   const lines: string[] = [];
-  await recordMaintenanceOutcome(db, { failed: [], durationMs: 5 }, (line) =>
-    lines.push(line),
+  // The fallback works, but the status itself was not recorded.
+  const recorded = await recordMaintenanceOutcome(
+    db,
+    { failed: [], durationMs: 5 },
+    (line) => lines.push(line),
   );
+  assert.equal(recorded, false);
   assert.equal(db.calls.length, 2);
   assert.equal(db.calls[1].sql, fallbackUpdate);
   assert.equal(lines.length, 1);
@@ -462,23 +487,39 @@ test("recordMaintenanceOutcome logs a failed status update, tries the fallback a
 test("recordMaintenanceOutcome tries the fallback only once and logs that failure too", async () => {
   const db = statusDb(2);
   const lines: string[] = [];
-  await recordMaintenanceOutcome(db, { failed: ["b"], durationMs: 5 }, (line) =>
-    lines.push(line),
+  const recorded = await recordMaintenanceOutcome(
+    db,
+    { failed: ["b"], durationMs: 5 },
+    (line) => lines.push(line),
   );
+  assert.equal(recorded, false);
   assert.equal(db.calls.length, 2);
   assert.equal(db.calls[1].sql, fallbackUpdate);
+  // Only the second line says it came from the fallback.
   assert.deepEqual(
-    lines.map((line) => JSON.parse(line).event),
-    ["operix.worker.status_failed", "operix.worker.status_failed"],
+    lines.map((line) => {
+      const entry = JSON.parse(line);
+      return [entry.event, entry.stage];
+    }),
+    [
+      ["operix.worker.status_failed", undefined],
+      ["operix.worker.status_failed", "fallback"],
+    ],
   );
   assert.doesNotMatch(lines.join("\n"), /a@b\.c|terminating/);
 });
 
 test("recordMaintenanceOutcome logs to console.error by default", async (t) => {
   const log = t.mock.method(console, "error", () => {});
-  await recordMaintenanceOutcome(statusDb(), { failed: [], durationMs: 1 });
+  assert.equal(
+    await recordMaintenanceOutcome(statusDb(), { failed: [], durationMs: 1 }),
+    true,
+  );
   assert.equal(log.mock.callCount(), 0);
-  await recordMaintenanceOutcome(statusDb(1), { failed: [], durationMs: 1 });
+  assert.equal(
+    await recordMaintenanceOutcome(statusDb(1), { failed: [], durationMs: 1 }),
+    false,
+  );
   assert.equal(log.mock.callCount(), 1);
   assert.equal(
     JSON.parse(String(log.mock.calls[0].arguments[0])).event,
@@ -502,10 +543,13 @@ test("the fallback update releases the worker lease and flags the error in job_r
         return db.query(sql, params);
       },
     };
-    await recordMaintenanceOutcome(
-      flaky,
-      { failed: [], durationMs: 5 },
-      () => {},
+    assert.equal(
+      await recordMaintenanceOutcome(
+        flaky,
+        { failed: [], durationMs: 5 },
+        () => {},
+      ),
+      false,
     );
     const [row] = await db.query(
       "SELECT last_error,started_at,last_success IS NOT NULL succeeded FROM job_runs WHERE id='worker'",
@@ -615,6 +659,54 @@ test(
       succeeded: true,
       released: true,
       renewed: true,
+    });
+  },
+);
+
+test(
+  "the worker exits 1 with --once when it cannot record its status",
+  { timeout: 120000 },
+  async (t) => {
+    const dir = await mkdtemp(join(tmpdir(), "operix-worker-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const migrated = await runScript("migrate", {}, dir);
+    assert.equal(migrated.code, 0, migrated.stderr);
+    // Every job succeeds, but writing the pass's duration is refused. The claim
+    // and the fallback update do not write it.
+    await inDatabase(
+      (db) =>
+        db.exec(
+          "ALTER TABLE job_runs ADD CONSTRAINT worker_no_duration CHECK (id<>'worker' OR last_duration_ms IS NULL)",
+        ),
+      dir,
+    );
+
+    const result = await runScript("worker", {}, dir, "--once");
+    assert.equal(result.code, 1, result.stderr);
+    const lines = result.stderr
+      .split("\n")
+      .filter((line) => line.startsWith("{"))
+      .map((line) => JSON.parse(line));
+    assert.equal(lines.length, 1, result.stderr);
+    assert.equal(lines[0].event, "operix.worker.status_failed");
+    assert.equal(lines[0].code, "23514");
+    assert.equal(lines[0].constraint, "worker_no_duration");
+    assert.ok(!("stage" in lines[0]));
+    // The jobs themselves ran clean.
+    assert.match(result.stdout, /"event":"operix.worker.completed"/);
+    const [worker] = await inDatabase(
+      async (db) =>
+        (
+          await db.query(
+            "SELECT last_error,started_at IS NULL released,last_success IS NULL never_recorded FROM job_runs WHERE id='worker'",
+          )
+        ).rows,
+      dir,
+    );
+    assert.deepEqual(worker, {
+      last_error: "status_update_failed",
+      released: true,
+      never_recorded: true,
     });
   },
 );

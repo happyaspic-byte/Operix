@@ -38,7 +38,8 @@ async function tick() {
     ["scanPendingDocuments", scanPendingDocuments],
   ]);
   const durationMs = Date.now() - start;
-  await recordMaintenanceOutcome(db, { failed, durationMs });
+  const recorded = await recordMaintenanceOutcome(db, { failed, durationMs });
+  if (once && !recorded) process.exitCode = 1;
   if (!failed.length) {
     console.log(
       JSON.stringify({
