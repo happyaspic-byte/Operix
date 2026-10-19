@@ -55,9 +55,9 @@ jobs:
         run: npm run typecheck && npm run lint
       - name: Domain and security tests against PostgreSQL
         run: |
-          mkdir -p test-results
+          mkdir -p .data
           set -o pipefail
-          npm test | tee test-results/domain-tests.txt
+          npm test | tee .data/domain-tests.txt
       - name: NAS deployment contract tests
         run: python3 -m unittest discover -s tests -p 'test_nas_*.py'
       - run: npm run db:migrate
@@ -96,7 +96,7 @@ jobs:
           include-hidden-files: true
           path: |
             test-results/e2e-results.json
-            test-results/domain-tests.txt
+            .data/domain-tests.txt
             test-results/revision.json
             .data/contention-performance.json
             test-results/accessibility.json
