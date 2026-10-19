@@ -1,6 +1,5 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,25 +11,32 @@ const bootstrap = {
 };
 const renamedEmail = "renamed-admin@operix.test";
 const activeAdmins =
-  "SELECT email FROM users WHERE role='admin' AND active AND deleted_at IS NULL AND privacy_erased_at IS NULL ORDER BY email";
+  "SELECT id, email FROM users WHERE role='admin' AND active AND deleted_at IS NULL AND privacy_erased_at IS NULL ORDER BY email";
 const notActiveAdmin =
   /ADMIN_EMAIL belongs to an existing account that is not an active administrator\. Choose another ADMIN_EMAIL\./;
 const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-// How scripts/seed.ts derives the ids of its demo data. The bootstrap
-// administrator used to get demoId("admin"), which is UUID-shaped too.
-function demoId(key: string) {
-  const h = createHash("sha256")
-    .update("operix-demo:" + key)
-    .digest("hex");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
-}
+// Older deployments' bootstrap administrator has this fixed id: sha256("operix-demo:admin"), formatted as in scripts/seed.ts.
+const legacyAdminId = "3e963976-44c5-4522-8809-f7ce04661036";
 
 // Like `npm run db:migrate` and `npm run db:seed`, every script runs in its own
 // process against one PGlite directory. The tests share that database and
-// depend on running in order, except the last, which brings its own.
+// depend on running in order, except the last two, which bring their own.
 let dir: string;
+let bootstrapAdminId = "";
+
+// A database of its own, so the email is the only thing a new row can collide on.
+async function inFreshDatabase(run: (fresh: string) => Promise<void>) {
+  const fresh = await mkdtemp(join(tmpdir(), "operix-seed-"));
+  try {
+    const migrated = await runScript("migrate", {}, fresh);
+    assert.equal(migrated.code, 0, migrated.stderr);
+    await run(fresh);
+  } finally {
+    await rm(fresh, { recursive: true, force: true });
+  }
+}
 
 before(
   async () => {
@@ -60,21 +66,20 @@ test("seeding with ADMIN_EMAIL and ADMIN_PASSWORD creates one active administrat
     result.stdout.includes("Administrator bootstrap completed.\n"),
     result.stdout,
   );
-  const { rows } = await inDatabase((db) => db.query(activeAdmins), dir);
-  assert.deepEqual(rows, [{ email: bootstrap.ADMIN_EMAIL }]);
-});
-
-test("the bootstrap administrator's id is a UUID, not the fixed id derived for demo data", async () => {
   const { rows } = await inDatabase(
-    (db) =>
-      db.query<{ id: string }>("SELECT id FROM users WHERE email=$1", [
-        bootstrap.ADMIN_EMAIL,
-      ]),
+    (db) => db.query<{ id: string; email: string }>(activeAdmins),
     dir,
   );
-  assert.equal(rows.length, 1);
-  assert.match(rows[0].id, uuid);
-  assert.notEqual(rows[0].id, demoId("admin"));
+  assert.deepEqual(
+    rows.map((row) => row.email),
+    [bootstrap.ADMIN_EMAIL],
+  );
+  bootstrapAdminId = rows[0].id;
+});
+
+test("the bootstrap administrator's id is a UUID, not the fixed id derived for demo data", () => {
+  assert.match(bootstrapAdminId, uuid);
+  assert.notEqual(bootstrapAdminId, legacyAdminId);
 });
 
 test("seeding again after the administrator's email changed adds no second administrator", async () => {
@@ -139,13 +144,8 @@ test("demo seeding attributes its audit entries to the earliest active administr
   assert.deepEqual(rows, [{ user_id: "earliest-active-admin" }]);
 });
 
-test("seeding refuses an ADMIN_EMAIL that belongs to an account that is not an active administrator", async () => {
-  // A database of its own, so the email is the only thing the new row can
-  // collide on.
-  const fresh = await mkdtemp(join(tmpdir(), "operix-seed-"));
-  try {
-    const migrated = await runScript("migrate", {}, fresh);
-    assert.equal(migrated.code, 0, migrated.stderr);
+test("seeding refuses an ADMIN_EMAIL that belongs to an account that is not an active administrator", () =>
+  inFreshDatabase(async (fresh) => {
     await inDatabase(
       (db) =>
         db.query(
@@ -153,8 +153,19 @@ test("seeding refuses an ADMIN_EMAIL that belongs to an account that is not an a
         ),
       fresh,
     );
+    const viewer = {
+      email: "existing-viewer@operix.test",
+      role: "viewer",
+      active: true,
+    };
+    const users = () =>
+      inDatabase(
+        (db) =>
+          db.query("SELECT email, role, active FROM users ORDER BY email"),
+        fresh,
+      );
 
-    const result = await runScript(
+    const refused = await runScript(
       "seed",
       {
         ADMIN_EMAIL: "existing-viewer@operix.test",
@@ -162,16 +173,54 @@ test("seeding refuses an ADMIN_EMAIL that belongs to an account that is not an a
       },
       fresh,
     );
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, notActiveAdmin);
-    const { rows } = await inDatabase(
-      (db) => db.query("SELECT email, role, active FROM users"),
+    assert.notEqual(refused.code, 0);
+    assert.match(refused.stderr, notActiveAdmin);
+    assert.deepEqual((await users()).rows, [viewer]);
+
+    // Choosing another ADMIN_EMAIL recovers from the refusal.
+    const recovered = await runScript(
+      "seed",
+      {
+        ADMIN_EMAIL: "recovered-admin@operix.test",
+        ADMIN_PASSWORD: bootstrap.ADMIN_PASSWORD,
+      },
       fresh,
     );
-    assert.deepEqual(rows, [
-      { email: "existing-viewer@operix.test", role: "viewer", active: true },
+    assert.equal(recovered.code, 0, recovered.stderr);
+    assert.ok(
+      recovered.stdout.includes("Administrator bootstrap completed.\n"),
+      recovered.stdout,
+    );
+    assert.deepEqual((await users()).rows, [
+      viewer,
+      { email: "recovered-admin@operix.test", role: "admin", active: true },
     ]);
-  } finally {
-    await rm(fresh, { recursive: true, force: true });
-  }
-});
+  }));
+
+test("seeding bootstraps an administrator when the only admins are deleted or erased", () =>
+  inFreshDatabase(async (fresh) => {
+    await inDatabase(async (db) => {
+      // deleted_users_inactive keeps a deleted account inactive; drop it in
+      // this database so the deleted_at term of the predicate is what decides.
+      await db.exec("ALTER TABLE users DROP CONSTRAINT deleted_users_inactive");
+      await db.exec(
+        "INSERT INTO users(id,email,name,role,password_hash,active,deleted_at) VALUES ('deleted-admin','deleted-admin@operix.test','Deleted','admin','unused',true,now())",
+      );
+      await db.exec(
+        "INSERT INTO users(id,email,name,role,password_hash,active,privacy_erased_at) VALUES ('erased-admin','erased-admin@operix.test','Erased','admin','unused',true,now())",
+      );
+    }, fresh);
+
+    const result = await runScript("seed", bootstrap, fresh);
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(
+      result.stdout.includes("Administrator bootstrap completed.\n"),
+      result.stdout,
+    );
+    assert.doesNotMatch(result.stdout, /bootstrap skipped/);
+    const { rows } = await inDatabase((db) => db.query(activeAdmins), fresh);
+    assert.deepEqual(
+      rows.map((row) => row.email),
+      [bootstrap.ADMIN_EMAIL],
+    );
+  }));
