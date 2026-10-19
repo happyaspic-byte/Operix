@@ -17,15 +17,15 @@
 - `scripts/seed.ts` runs on every internal-server deploy. If the bootstrap admin's email is changed, its fixed id collides (only `ON CONFLICT(email)` is handled) and migrate exits 1; `ADMIN_PASSWORD` must stay in `.env` forever.
 - "모두 읽음" in the notification panel always gets HTTP 400: Next 16 passes a non-null empty body for a body-less PATCH, so the route calls `readJson("")`. The click handler has no error handling.
 - Unexpected 500s and worker failures log no error name, message or stack; one failing maintenance job also skips the remaining ones.
-- `(erp)/error.tsx` uses `reset`, which in this Next version does not re-fetch, so "다시 시도" cannot recover from server errors. `/constructor`-style URLs pass the `!catalog[kind]` guard and crash instead of 404. `tests/user-organization-privacy.test.ts` fails when `SESSION_SECRET` is unset.
+- `(erp)/error.tsx` uses `reset`, which in this Next version does not re-fetch, so "다시 시도" cannot recover from server errors. `/constructor`-style URLs pass the `!catalog[kind]` guard and show the error page instead of the not-found page (the app keeps HTTP 200 because `(erp)/loading.tsx` streams every page, so Task 6 Step 4 asserts the page, not the status). `tests/user-organization-privacy.test.ts` fails when `SESSION_SECRET` is unset.
 - Contract detail shows the customer name as "이전 계약"; component and VM detail show the raw asset UUID as "대상 자산".
 
 ## Global Constraints
 
-- Node.js 24 is required. Before running any command: `source /tmp/claude-1000/-home-ubuntu-project-Operix/18406795-ebce-40b6-95f4-cab14937652e/scratchpad/env.sh` (puts Node 24.22.0 first on PATH, sets a synthetic `SESSION_SECRET`, unsets `DATABASE_URL`/`TEST_DATABASE_URL`). Never point any command at a real database.
+- Node.js 24 is required. Before running any command, use a shell with Node 24 (24.22.0 was used) first on PATH, a synthetic `SESSION_SECRET`, and `DATABASE_URL`/`TEST_DATABASE_URL` unset. Never point any command at a real database.
 - Focused tests: `node --import tsx --test tests/<file>.test.ts`. Full suite: `npm test`. Tests use in-memory PGlite through `tests/helpers/isolated-db.ts`.
 - Before every commit: `npm run typecheck`, `npm run lint` and `npm run format:check` must pass, and `npm test` must pass.
-- E2E only where a task says so: `bash /tmp/claude-1000/-home-ubuntu-project-Operix/18406795-ebce-40b6-95f4-cab14937652e/scratchpad/e2e.sh [--no-build] <spec files>` (builds unless `--no-build`, fresh PGlite DB, port 3000, admin `admin@operix.test` / env `ADMIN_PASSWORD`). Never run two copies at once.
+- E2E only where a task says so: use a local e2e runner that migrates and seeds a fresh embedded (PGlite) database, builds (unless told not to), then runs Playwright on the given spec files against port 3000 as admin `admin@operix.test` with the `ADMIN_PASSWORD` from its environment. Never run two copies at once.
 - Business time zone is `Asia/Seoul`; business dates are `YYYY-MM-DD` strings; "today" is `todayKST()` from `src/lib/dates.ts`.
 - User-facing copy is Korean in the existing polite tone (e.g. "다시 시도해 주세요.").
 - Never log personal data: no request bodies, SQL parameters, or pg error `detail`/`hint`/`where`.
@@ -34,7 +34,7 @@
 
 ## Review Focus
 
-1. A PostgreSQL URL that already carries `options` (the tests' `-c search_path=…`) must keep it when the time-zone option is added — Task 1 test.
+1. A PostgreSQL URL that already carries `options` (the tests' `-c search_path=…`) must keep it when the time-zone option is added — Task 1 test. (Task 8 replaced the URL rewrite `withSessionTimeZone` with `applySessionTimeZone`, run through pg-pool's `onConnect` hook and a post-connect `SET` on the migration client; the URL now passes through unchanged, so its options are kept by construction and the tests assert that.)
 2. Migrations must still apply exactly once and remain idempotent on re-run, on both PGlite and PostgreSQL code paths — Task 2 test.
 3. Seed re-run after the bootstrap admin's email changed, and re-run without `ADMIN_*` — Task 3 test.
 4. PATCH `/api/notifications` with an empty body, `{ "all": true }`, `{ "ids": [...] }`, and malformed JSON (must stay 400) — Task 4 tests.
@@ -50,7 +50,7 @@
 - Create: `tests/timezone.test.ts`
 
 **Interfaces:**
-- Produces: `export const DB_TIME_ZONE = "Asia/Seoul"` and `export function withSessionTimeZone(connectionString: string): string` in `src/lib/db.ts` (Task 2 uses it).
+- Produces: `export const DB_TIME_ZONE = "Asia/Seoul"` and `export function withSessionTimeZone(connectionString: string): string` in `src/lib/db.ts` (Task 2 uses it). *Superseded: Task 8 replaced `withSessionTimeZone` with `applySessionTimeZone`, run through pg-pool's `onConnect` hook and a post-connect `SET` on the migration client.*
 - Produces: `export function reportDocumentNumber(id: string, today = todayKST()): string` in `src/lib/reports.ts`.
 
 - [ ] **Step 1: Write the failing tests** in `tests/timezone.test.ts`:
@@ -77,10 +77,10 @@
 - Create: `tests/migration-connection.test.ts`
 
 **Interfaces:**
-- Consumes: `withSessionTimeZone` (Task 1).
+- Consumes: `withSessionTimeZone` (Task 1). *Superseded: Task 8 replaced it with `applySessionTimeZone`, run through pg-pool's `onConnect` hook and a post-connect `SET` on the migration client.*
 - Produces in `src/lib/db.ts`:
   - `export const MIGRATION_LOCK_KEY = 7305010`
-  - `export function migrationClientConfig(connectionString: string): ClientConfig` (pg) returning exactly `{ connectionString: withSessionTimeZone(connectionString), connectionTimeoutMillis: 10000, statement_timeout: 0, lock_timeout: 60000, application_name: "operix-migrate" }` and no `query_timeout`.
+  - `export function migrationClientConfig(connectionString: string): ClientConfig` (pg) returning exactly `{ connectionString: withSessionTimeZone(connectionString), connectionTimeoutMillis: 10000, statement_timeout: 0, lock_timeout: 60000, application_name: "operix-migrate" }` and no `query_timeout`. *Superseded by Task 8: `connectionString` is passed through unchanged and `statement_timeout: 0` is set by a post-connect `SET`.*
   - `export async function connectForMigrations(): Promise<Database>`: with `DATABASE_URL`, a single connected `pg.Client` built from `migrationClientConfig`, wrapped in the existing `Database` interface (`transaction` = BEGIN/COMMIT/ROLLBACK on that client, `close` = `client.end()`, rows normalized like the pool path); otherwise `getDb()`.
 
 - [ ] **Step 1: Write the failing tests:**
@@ -143,7 +143,7 @@
 
 - [ ] **Step 5: Write `e2e/notifications.spec.ts`:** log in as admin the way existing specs do. If `GET /api/notifications?read=unread` shows no unread notification, arrange one through public API calls only. Open the notification panel, click "모두 읽음", expect the unread indicator to disappear and `unread_total` to become 0. Also assert that `PATCH` with `{ ids: [<an existing notification id>] }` returns 200.
 
-- [ ] **Step 6: Verify:** unit tests, `bash …/scratchpad/e2e.sh e2e/notifications.spec.ts`, then the Global Constraints checks.
+- [ ] **Step 6: Verify:** unit tests, the local e2e runner on `e2e/notifications.spec.ts`, then the Global Constraints checks.
 
 - [ ] **Step 7: Commit** `fix: make mark-all-read notifications work`.
 
@@ -160,7 +160,7 @@
 - Produces: `export function errorSummary(error: unknown): Record<string, unknown>` in `src/lib/error-log.ts`:
   - always `name` (the error's `name`, else `typeof` / `"null"`);
   - string `code` and the pg fields `severity`, `table`, `column`, `constraint`, `routine` when present;
-  - `message` (first 300 chars) only when the error has no `code`;
+  - `message` (first 300 chars) only when the error has no `code` and is a `TypeError`, `RangeError` or `ReferenceError` or carries one of the fixed connectivity messages of pg and pg-pool (final review: parsers and libraries quote their input, so no other message is logged);
   - `stack`: the stack lines after the first (the first repeats the message), at most 8, trimmed, joined by `\n`, capped at 1500 chars;
   - never `detail`, `hint`, `where`, `query`, `parameters`, `internalQuery`. Must not throw for any input.
 - Produces: `export async function runMaintenanceJobs(jobs: Array<[string, () => Promise<unknown>]>, log: (line: string) => void = console.error): Promise<string[]>` in `src/lib/maintenance.ts`: runs jobs in order, catches each failure, logs one JSON line `{ event: "operix.worker.job_failed", job, ...errorSummary(e) }`, continues, and returns the failed job names.
@@ -168,7 +168,7 @@
 - [ ] **Step 1: Write the failing tests:**
   - `errorSummary(new TypeError("boom"))` → `name "TypeError"`, `message "boom"`, `stack` not containing `TypeError: boom`.
   - A pg-like `Error` with `code "23505"`, `detail "Key (email)=(a@b.c) already exists."`, `table "users"`, `constraint "users_email_key"`, `severity "ERROR"` → those fields present, no `message`, and `JSON.stringify(result)` does not contain `a@b.c`.
-  - A 1000-char message → `message.length === 300`. Inputs `"x"`, `null` and `{}` return an object with `name` and do not throw.
+  - A 1000-char `RangeError` message → `message.length === 300`. Inputs `"x"`, `null` and `{}` return an object with `name` and do not throw.
   - `failure(new TypeError("boom"))` with `console.error` stubbed: one JSON log line with `event "operix.request.failed"`, `request_id`, `name`, `message`; response status 500. `failure(new AppError(400, "x"))` logs nothing.
   - `runMaintenanceJobs([["a", ok], ["b", throws], ["c", ok]], log)` → returns `["b"]`, `a` and `c` both ran, `log` called once with `job: "b"`.
 
@@ -198,7 +198,7 @@
 
 - [ ] **Step 3:** At the top of `tests/user-organization-privacy.test.ts` set a default `SESSION_SECRET` the way `tests/domain.test.ts` does. Verify with `env -u SESSION_SECRET node --import tsx --test tests/user-organization-privacy.test.ts` → PASS.
 
-- [ ] **Step 4: E2E (revised 2026-10-19):** `(erp)/loading.tsx` streams every `(erp)` page, so `notFound()` cannot change the HTTP status from 200 (Next's documented streaming contract). Assert the observable outcome instead: in `e2e/security-http.spec.ts`, log in as admin through `page.request`, then for `/constructor`, `/toString` and `/constructor/00000000-0000-4000-8000-000000000000` expect the heading `페이지를 찾을 수 없습니다.` to be visible and the text `정보를 불러오지 못했습니다.` to have count 0. Run `bash …/scratchpad/e2e.sh e2e/security-http.spec.ts`.
+- [ ] **Step 4: E2E (revised 2026-10-19):** `(erp)/loading.tsx` streams every `(erp)` page, so `notFound()` cannot change the HTTP status from 200 (Next's documented streaming contract). Assert the observable outcome instead: in `e2e/security-http.spec.ts`, log in as admin through `page.request`, then for `/constructor`, `/toString` and `/constructor/00000000-0000-4000-8000-000000000000` expect the heading `페이지를 찾을 수 없습니다.` to be visible and the text `정보를 불러오지 못했습니다.` to have count 0. Run the local e2e runner on `e2e/security-http.spec.ts`.
 
 - [ ] **Step 5: Verify** the Global Constraints checks.
 
@@ -271,8 +271,8 @@ Why: rewriting `DATABASE_URL` breaks a password containing a malformed percent e
   - Replace the fixed-id collision test: the bootstrap admin's id is a UUID and not `id("admin")` (`operix-demo:admin`-derived).
   - On the skip path, stdout contains `Administrator already exists; bootstrap skipped.` and does not contain `Administrator bootstrap completed`.
 - [ ] **Step 2: Run to verify failure:** `node --import tsx --test tests/seed.test.ts`.
-- [ ] **Step 3: Implement.** The bootstrap admin gets `crypto.randomUUID()` (grep first: no other code may rely on `id("admin")`). The closing `Administrator bootstrap completed; existing credentials were preserved.` line prints only when this run inserted the admin.
-- [ ] **Step 4: Docs.** In the `ADMIN_EMAIL / ADMIN_PASSWORD` row of `docs/DEPLOYMENT.md`, add that the NAS Portainer template (`deploy/nas/compose.template.json`) still requires both variables, so keep them in that deployment.
+- [ ] **Step 3: Implement.** The bootstrap admin gets `crypto.randomUUID()` (grep first: no other code may rely on `id("admin")`). The closing `Administrator bootstrap completed.` line prints only when this run inserted the admin.
+- [ ] **Step 4: Docs.** In the `ADMIN_EMAIL / ADMIN_PASSWORD` row of `docs/DEPLOYMENT.md`, add that the NAS Portainer template (`deploy/nas/compose.template.json`) still requires both variables, so keep them in that deployment. *Reworded in the final fix wave: the NAS `migrate` service does not run the seed, so a new NAS stack's first administrator is created out-of-band, and the variables are required there only because the template interpolates them.*
 - [ ] **Step 5: Verify** the focused test and the Global Constraints checks.
 - [ ] **Step 6: Commit** `fix: tidy admin bootstrap seed identity and output`.
 
@@ -283,14 +283,14 @@ Why: rewriting `DATABASE_URL` breaks a password containing a malformed percent e
 - Modify: `tests/error-log.test.ts`
 
 **Interfaces:**
-- Produces in `src/lib/maintenance.ts`: `export async function recordMaintenanceOutcome(db: { query: (sql: string, params?: any[]) => Promise<unknown> }, outcome: { failed: string[]; durationMs: number }, log: (line: string) => void = console.error): Promise<void>` — performs today's success UPDATE (with `last_duration_ms`) when `failed` is empty, otherwise today's failure UPDATE (`last_error = maintenance_failed:<names>`); it never throws: if the UPDATE fails it logs one JSON line `{ event: "operix.worker.status_failed", ...errorSummary(e) }` and then tries `UPDATE job_runs SET last_error='status_update_failed',started_at=NULL WHERE id='worker'` once more, swallowing (but logging) that failure too.
+- Produces in `src/lib/maintenance.ts`: `export async function recordMaintenanceOutcome(db: { query: (sql: string, params?: any[]) => Promise<unknown> }, outcome: { failed: string[]; durationMs: number }, log: (line: string) => void = console.error): Promise<boolean>` — performs today's success UPDATE (with `last_duration_ms`) when `failed` is empty, otherwise today's failure UPDATE (`last_error = maintenance_failed:<names>`); it never throws: if the UPDATE fails it logs one JSON line `{ event: "operix.worker.status_failed", ...errorSummary(e) }` and then tries `UPDATE job_runs SET last_error='status_update_failed',started_at=NULL WHERE id='worker'` once more, swallowing (but logging, with `stage: "fallback"`) that failure too. It resolves to `true` only when the primary UPDATE succeeded, and `worker --once` exits 1 otherwise.
 
 - [ ] **Step 1: Write the failing tests:**
   - `errorSummary` of an error with `code "22P02"` and message `invalid input syntax for type uuid: "line1\nat secret@x.y"` (also with leading spaces before `at`) contains no `secret@x.y` anywhere in `JSON.stringify(result)`.
   - `recordMaintenanceOutcome` with a fake db: empty `failed` → one success UPDATE with the duration; `failed ["b"]` → one UPDATE whose parameters include `maintenance_failed:b`; a db whose `query` throws → the call resolves, `log` received the `operix.worker.status_failed` line and the fallback UPDATE was attempted.
 - [ ] **Step 2: Run to verify failure:** `node --import tsx --test tests/error-log.test.ts`.
-- [ ] **Step 3: Implement.** `stackFrames` skips the header by counting the message's lines when the stack starts with `<name>: <message>`, and falls back to the first `at ` line only otherwise. `scripts/worker.ts` replaces its two inline UPDATE branches with `recordMaintenanceOutcome` (keep the `operix.worker.completed` / `operix.worker.failed` log lines and the `--once` exit code). In `shell.tsx` the "모두 읽음" success path uses a functional update (`setNotifications((current) => current.map(...))`).
-- [ ] **Step 4: Verify** the focused test, `bash …/scratchpad/e2e.sh e2e/notifications.spec.ts`, and the Global Constraints checks.
+- [ ] **Step 3: Implement.** `stackFrames` looks for the message on the stack's first line without comparing the header's name (pg renames errors after V8 writes the header) and skips the header by counting the message's lines; the first `at ` line is used only when a single-line message is not found there, and an unlocatable multi-line message logs no frames. `scripts/worker.ts` replaces its two inline UPDATE branches with `recordMaintenanceOutcome` (keep the `operix.worker.completed` / `operix.worker.failed` log lines and the `--once` exit code). In `shell.tsx` the "모두 읽음" success path uses a functional update (`setNotifications((current) => current.map(...))`).
+- [ ] **Step 4: Verify** the focused test, the local e2e runner on `e2e/notifications.spec.ts`, and the Global Constraints checks.
 - [ ] **Step 5: Commit** `fix: harden worker status updates, stack redaction and notification state`.
 
 ### Task 11: Shared script test helpers
