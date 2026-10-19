@@ -360,8 +360,8 @@ export function Shell({
                             });
                             setNotificationError("");
                             setUnreadTotal(0);
-                            setNotifications(
-                              notifications.map((n) => ({
+                            setNotifications((old) =>
+                              old.map((n) => ({
                                 ...n,
                                 read_at: new Date().toISOString(),
                               })),

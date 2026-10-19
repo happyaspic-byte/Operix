@@ -9,8 +9,12 @@ import { promisify } from "node:util";
 import { PGlite } from "@electric-sql/pglite";
 import { errorSummary } from "../src/lib/error-log.ts";
 import { failure } from "../src/lib/http.ts";
-import { runMaintenanceJobs } from "../src/lib/maintenance.ts";
+import {
+  recordMaintenanceOutcome,
+  runMaintenanceJobs,
+} from "../src/lib/maintenance.ts";
 import { AppError } from "../src/lib/policy.ts";
+import { isolatedDatabase } from "./helpers/isolated-db.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const run = promisify(execFile);
@@ -91,6 +95,57 @@ test("errorSummary does not let a multi-line database message into the stack", (
   const logged = JSON.stringify(errorSummary(error));
   assert.doesNotMatch(logged, /secret|c@d\.e/);
   assert.match(logged, /"code":"22007"/);
+});
+
+test("errorSummary does not let a quoted line starting with 'at ' into the stack", () => {
+  for (const quoted of [
+    "line1\nat secret@x.y",
+    "line1\n    at secret@x.y",
+    "line1\r\nat secret@x.y",
+  ]) {
+    const error = databaseError(
+      "22P02",
+      `invalid input syntax for type uuid: "${quoted}"`,
+    );
+    assert.match(String(error.stack), /secret@x\.y/);
+    const summary = errorSummary(error);
+    assert.doesNotMatch(JSON.stringify(summary), /secret@x\.y/);
+    assert.equal(summary.code, "22P02");
+    assert.match(String(summary.stack), /^at databaseError /);
+  }
+});
+
+test("errorSummary skips the header by the message's lines whatever name the header carries", () => {
+  const message = 'invalid input syntax for type uuid: "line1\nat secret@x.y"';
+  const error = Object.assign(new Error(message), {
+    name: "error",
+    code: "22P02",
+  });
+  // The header was written before the error was renamed.
+  error.stack = [
+    `Error: ${message}`,
+    "    at frame0 (app.ts:1:1)",
+    "    at frame1 (app.ts:2:1)",
+  ].join("\n");
+  assert.deepEqual(errorSummary(error), {
+    name: "error",
+    code: "22P02",
+    stack: "at frame0 (app.ts:1:1)\nat frame1 (app.ts:2:1)",
+  });
+});
+
+test("errorSummary falls back to the first frame when the stack does not carry the message", () => {
+  const error = new TypeError("old one\nold two");
+  void error.stack;
+  error.message = "new";
+  const summary = errorSummary(error);
+  assert.equal(summary.message, "new");
+  assert.match(String(summary.stack), /^at /);
+  assert.doesNotMatch(String(summary.stack), /old/);
+  // A message found only further down is not the header.
+  error.stack = "TypeError: old one\nold two\n    at frame0 (app.ts:1:1)";
+  error.message = "frame0";
+  assert.equal(errorSummary(error).stack, "at frame0 (app.ts:1:1)");
 });
 
 test("errorSummary summarises any value by type without throwing", () => {
@@ -238,6 +293,146 @@ test("maintenance jobs report every failure and log to console.error by default"
       ["operix.worker.job_failed", "c", "RangeError"],
     ],
   );
+});
+
+// Stands in for the database: records each statement and fails the first
+// `failures` of them with a database error.
+function statusDb(failures = 0) {
+  const calls: Array<{ sql: string; params?: any[] }> = [];
+  return {
+    calls,
+    async query(sql: string, params?: any[]) {
+      calls.push({ sql, params });
+      if (calls.length <= failures)
+        throw databaseError("57P01", "terminating connection");
+      return [];
+    },
+  };
+}
+
+const fallbackUpdate =
+  "UPDATE job_runs SET last_error='status_update_failed',started_at=NULL WHERE id='worker'";
+
+test("recordMaintenanceOutcome records a clean pass with its duration", async () => {
+  const db = statusDb();
+  const lines: string[] = [];
+  await recordMaintenanceOutcome(db, { failed: [], durationMs: 1234 }, (line) =>
+    lines.push(line),
+  );
+  assert.equal(db.calls.length, 1);
+  const [{ sql, params }] = db.calls;
+  for (const part of [
+    "heartbeat_at=now()",
+    "last_success=now()",
+    "last_error=NULL",
+    "last_duration_ms=$1",
+    "started_at=NULL",
+    "WHERE id='worker'",
+  ])
+    assert.ok(sql.includes(part), part);
+  assert.deepEqual(params, [1234]);
+  assert.deepEqual(lines, []);
+});
+
+test("recordMaintenanceOutcome names the failed jobs and leaves the last success alone", async () => {
+  const cases: Array<[string[], string]> = [
+    [["b"], "maintenance_failed:b"],
+    [
+      ["runJobs", "purgeDeletedFiles"],
+      "maintenance_failed:runJobs,purgeDeletedFiles",
+    ],
+  ];
+  for (const [failed, lastError] of cases) {
+    const db = statusDb();
+    await recordMaintenanceOutcome(db, { failed, durationMs: 9 }, () => {});
+    assert.equal(db.calls.length, 1);
+    const [{ sql, params }] = db.calls;
+    for (const part of [
+      "heartbeat_at=now()",
+      "last_error=$1",
+      "started_at=NULL",
+      "WHERE id='worker'",
+    ])
+      assert.ok(sql.includes(part), part);
+    assert.doesNotMatch(sql, /last_success|last_duration_ms/);
+    assert.deepEqual(params, [lastError]);
+  }
+});
+
+test("recordMaintenanceOutcome logs a failed status update, tries the fallback and still resolves", async () => {
+  const db = statusDb(1);
+  const lines: string[] = [];
+  await recordMaintenanceOutcome(db, { failed: [], durationMs: 5 }, (line) =>
+    lines.push(line),
+  );
+  assert.equal(db.calls.length, 2);
+  assert.equal(db.calls[1].sql, fallbackUpdate);
+  assert.equal(lines.length, 1);
+  const entry = JSON.parse(lines[0]);
+  assert.equal(entry.event, "operix.worker.status_failed");
+  assert.equal(entry.code, "57P01");
+  assert.doesNotMatch(lines[0], /a@b\.c|terminating/);
+});
+
+test("recordMaintenanceOutcome tries the fallback only once and logs that failure too", async () => {
+  const db = statusDb(2);
+  const lines: string[] = [];
+  await recordMaintenanceOutcome(db, { failed: ["b"], durationMs: 5 }, (line) =>
+    lines.push(line),
+  );
+  assert.equal(db.calls.length, 2);
+  assert.equal(db.calls[1].sql, fallbackUpdate);
+  assert.deepEqual(
+    lines.map((line) => JSON.parse(line).event),
+    ["operix.worker.status_failed", "operix.worker.status_failed"],
+  );
+  assert.doesNotMatch(lines.join("\n"), /a@b\.c|terminating/);
+});
+
+test("recordMaintenanceOutcome logs to console.error by default", async (t) => {
+  const log = t.mock.method(console, "error", () => {});
+  await recordMaintenanceOutcome(statusDb(), { failed: [], durationMs: 1 });
+  assert.equal(log.mock.callCount(), 0);
+  await recordMaintenanceOutcome(statusDb(1), { failed: [], durationMs: 1 });
+  assert.equal(log.mock.callCount(), 1);
+  assert.equal(
+    JSON.parse(String(log.mock.calls[0].arguments[0])).event,
+    "operix.worker.status_failed",
+  );
+});
+
+test("the fallback update releases the worker lease and flags the error in job_runs", async () => {
+  const { db, close } = await isolatedDatabase();
+  try {
+    await db.query(
+      "INSERT INTO job_runs(id,started_at,last_success) VALUES ('worker',now(),now())",
+    );
+    let refused = false;
+    const flaky = {
+      query: async (sql: string, params?: any[]) => {
+        if (!refused) {
+          refused = true;
+          throw databaseError("57P01", "terminating connection");
+        }
+        return db.query(sql, params);
+      },
+    };
+    await recordMaintenanceOutcome(
+      flaky,
+      { failed: [], durationMs: 5 },
+      () => {},
+    );
+    const [row] = await db.query(
+      "SELECT last_error,started_at,last_success IS NOT NULL succeeded FROM job_runs WHERE id='worker'",
+    );
+    assert.deepEqual(row, {
+      last_error: "status_update_failed",
+      started_at: null,
+      succeeded: true,
+    });
+  } finally {
+    await close();
+  }
 });
 
 // PGlite serves one process at a time: only call this while no script runs.

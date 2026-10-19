@@ -2,7 +2,10 @@ import { assertSupportedNodeVersion } from "./runtime-version.mjs";
 assertSupportedNodeVersion();
 import { setTimeout as delay } from "node:timers/promises";
 import { runJobs } from "../src/lib/jobs.ts";
-import { runMaintenanceJobs } from "../src/lib/maintenance.ts";
+import {
+  recordMaintenanceOutcome,
+  runMaintenanceJobs,
+} from "../src/lib/maintenance.ts";
 import { getDb } from "../src/lib/db.ts";
 import { scanPendingDocuments } from "../src/lib/documents.ts";
 import { purgeDeletedFiles } from "../src/lib/privacy.ts";
@@ -34,23 +37,17 @@ async function tick() {
     ["purgeDeletedFiles", purgeDeletedFiles],
     ["scanPendingDocuments", scanPendingDocuments],
   ]);
+  const durationMs = Date.now() - start;
+  await recordMaintenanceOutcome(db, { failed, durationMs });
   if (!failed.length) {
-    await db.query(
-      "UPDATE job_runs SET heartbeat_at=now(),last_success=now(),last_error=NULL,last_duration_ms=$1,started_at=NULL WHERE id='worker'",
-      [Date.now() - start],
-    );
     console.log(
       JSON.stringify({
         event: "operix.worker.completed",
-        duration_ms: Date.now() - start,
+        duration_ms: durationMs,
         ...result,
       }),
     );
   } else {
-    await db.query(
-      "UPDATE job_runs SET heartbeat_at=now(),last_error=$1,started_at=NULL WHERE id='worker'",
-      [`maintenance_failed:${failed.join(",")}`],
-    );
     console.error(JSON.stringify({ event: "operix.worker.failed" }));
     if (once) process.exitCode = 1;
   }

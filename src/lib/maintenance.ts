@@ -22,3 +22,41 @@ export async function runMaintenanceJobs(
   }
   return failed;
 }
+
+// The worker holds its lease while it records the outcome, so a failing update
+// must neither crash it nor leave the lease held: the fallback releases the
+// lease and leaves a marker that readiness reports.
+export async function recordMaintenanceOutcome(
+  db: { query: (sql: string, params?: any[]) => Promise<unknown> },
+  outcome: { failed: string[]; durationMs: number },
+  log: (line: string) => void = console.error,
+): Promise<void> {
+  const logFailure = (error: unknown) =>
+    log(
+      JSON.stringify({
+        event: "operix.worker.status_failed",
+        ...errorSummary(error),
+      }),
+    );
+  try {
+    if (outcome.failed.length)
+      await db.query(
+        "UPDATE job_runs SET heartbeat_at=now(),last_error=$1,started_at=NULL WHERE id='worker'",
+        [`maintenance_failed:${outcome.failed.join(",")}`],
+      );
+    else
+      await db.query(
+        "UPDATE job_runs SET heartbeat_at=now(),last_success=now(),last_error=NULL,last_duration_ms=$1,started_at=NULL WHERE id='worker'",
+        [outcome.durationMs],
+      );
+  } catch (error) {
+    logFailure(error);
+    try {
+      await db.query(
+        "UPDATE job_runs SET last_error='status_update_failed',started_at=NULL WHERE id='worker'",
+      );
+    } catch (fallbackError) {
+      logFailure(fallbackError);
+    }
+  }
+}

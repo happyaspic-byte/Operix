@@ -10,14 +10,26 @@ function stringField(error: unknown, key: string): string | undefined {
   }
 }
 
-// The first stack line repeats the message, and a multi-line message runs on
-// until the first frame.
-function stackFrames(stack: string) {
+// The header repeats the message, one line per line of it. Counting those lines
+// keeps a quoted value out of the frames even when one of its lines starts with
+// "at ". The header's name is not compared: it may differ from the error's
+// current name.
+function headerLines(stack: string, message: string | undefined) {
+  if (message === undefined) return undefined;
+  const at = stack.indexOf(message);
+  if (at < 0 || stack.slice(0, at).includes("\n")) return undefined;
+  return message.split("\n").length;
+}
+
+function stackFrames(stack: string, message: string | undefined) {
   const lines = stack.split("\n");
-  const start = Math.max(
-    1,
-    lines.findIndex((line) => /^\s*at\s/.test(line)),
-  );
+  // Without the message in the header, the first "at " line opens the frames.
+  const start =
+    headerLines(stack, message) ??
+    Math.max(
+      1,
+      lines.findIndex((line) => /^\s*at\s/.test(line)),
+    );
   return lines
     .slice(start, start + 8)
     .map((line) => line.trim())
@@ -42,7 +54,7 @@ export function errorSummary(error: unknown): Record<string, unknown> {
   if (message && !code) summary.message = message.slice(0, 300);
   const stack = stringField(error, "stack");
   if (stack) {
-    const trace = stackFrames(stack);
+    const trace = stackFrames(stack, message);
     if (trace) summary.stack = trace;
   }
   return summary;
