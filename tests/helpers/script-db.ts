@@ -17,7 +17,8 @@ const seedSettings = [
 
 // Runs scripts/<name>.ts in a process of its own, as `npm run db:migrate` and
 // the other script commands do, against the PGlite directory `pgliteDir`. `env`
-// overrides what the script would inherit and `args` follow the script path.
+// overrides what the script would inherit, except the database settings, and
+// `args` follow the script path.
 export async function runScript(
   name: string,
   env: Record<string, string>,
@@ -35,12 +36,13 @@ export async function runScript(
         env: {
           ...inherited,
           CI: "true",
-          DATABASE_URL: "",
-          OPERIX_EMBEDDED: "1",
-          PGLITE_PATH: pgliteDir,
           UPLOAD_DIR: join(pgliteDir, "uploads"),
           SESSION_SECRET: "script-test-session-secret-0123456789abcdef",
           ...env,
+          // Last, so no test can point a script at a real database.
+          DATABASE_URL: "",
+          OPERIX_EMBEDDED: "1",
+          PGLITE_PATH: pgliteDir,
         },
         timeout: 90000,
       },
