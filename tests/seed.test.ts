@@ -1,16 +1,11 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-import { PGlite } from "@electric-sql/pglite";
+import { inDatabase, runScript } from "./helpers/script-db.ts";
 
-const root = fileURLToPath(new URL("..", import.meta.url));
-const run = promisify(execFile);
 const bootstrap = {
   ADMIN_EMAIL: "seed-admin@operix.test",
   ADMIN_PASSWORD: "Seed-test-password-123!",
@@ -37,64 +32,10 @@ function demoId(key: string) {
 // depend on running in order, except the last, which brings its own.
 let dir: string;
 
-async function runScript(
-  name: string,
-  env: Record<string, string> = {},
-  pgliteDir = dir,
-) {
-  const inherited = { ...process.env };
-  for (const key of [
-    "ADMIN_EMAIL",
-    "ADMIN_PASSWORD",
-    "SEED_DEMO",
-    "DEMO_PASSWORD",
-  ])
-    delete inherited[key];
-  try {
-    const { stdout, stderr } = await run(
-      process.execPath,
-      ["--import", "tsx", `scripts/${name}.ts`],
-      {
-        cwd: root,
-        env: {
-          ...inherited,
-          CI: "true",
-          DATABASE_URL: "",
-          OPERIX_EMBEDDED: "1",
-          PGLITE_PATH: pgliteDir,
-          SESSION_SECRET: "seed-test-session-secret-0123456789abcdef",
-          ...env,
-        },
-        timeout: 90000,
-      },
-    );
-    return { code: 0, stdout, stderr };
-  } catch (error: any) {
-    // A timeout or a failure to start is not a script exit status.
-    if (typeof error.code !== "number") throw error;
-    return {
-      code: error.code as number,
-      stdout: error.stdout,
-      stderr: error.stderr,
-    };
-  }
-}
-
-// PGlite serves one process at a time: only call this while no script runs.
-async function inDatabase<T>(fn: (db: PGlite) => Promise<T>, pgliteDir = dir) {
-  const db = new PGlite(pgliteDir);
-  try {
-    await db.waitReady;
-    return await fn(db);
-  } finally {
-    await db.close();
-  }
-}
-
 before(
   async () => {
     dir = await mkdtemp(join(tmpdir(), "operix-seed-"));
-    const migrated = await runScript("migrate");
+    const migrated = await runScript("migrate", {}, dir);
     assert.equal(migrated.code, 0, migrated.stderr);
   },
   { timeout: 120000 },
@@ -104,7 +45,7 @@ after(async () => {
 });
 
 test("seeding an empty database requires ADMIN_EMAIL and ADMIN_PASSWORD", async () => {
-  const result = await runScript("seed");
+  const result = await runScript("seed", {}, dir);
   assert.notEqual(result.code, 0);
   assert.match(
     result.stderr,
@@ -113,7 +54,7 @@ test("seeding an empty database requires ADMIN_EMAIL and ADMIN_PASSWORD", async 
 });
 
 test("seeding with ADMIN_EMAIL and ADMIN_PASSWORD creates one active administrator", async () => {
-  const result = await runScript("seed", bootstrap);
+  const result = await runScript("seed", bootstrap, dir);
   assert.equal(result.code, 0, result.stderr);
   assert.ok(
     result.stdout.includes(
@@ -121,15 +62,17 @@ test("seeding with ADMIN_EMAIL and ADMIN_PASSWORD creates one active administrat
     ),
     result.stdout,
   );
-  const { rows } = await inDatabase((db) => db.query(activeAdmins));
+  const { rows } = await inDatabase((db) => db.query(activeAdmins), dir);
   assert.deepEqual(rows, [{ email: bootstrap.ADMIN_EMAIL }]);
 });
 
 test("the bootstrap administrator's id is a UUID, not the fixed id derived for demo data", async () => {
-  const { rows } = await inDatabase((db) =>
-    db.query<{ id: string }>("SELECT id FROM users WHERE email=$1", [
-      bootstrap.ADMIN_EMAIL,
-    ]),
+  const { rows } = await inDatabase(
+    (db) =>
+      db.query<{ id: string }>("SELECT id FROM users WHERE email=$1", [
+        bootstrap.ADMIN_EMAIL,
+      ]),
+    dir,
   );
   assert.equal(rows.length, 1);
   assert.match(rows[0].id, uuid);
@@ -137,24 +80,27 @@ test("the bootstrap administrator's id is a UUID, not the fixed id derived for d
 });
 
 test("seeding again after the administrator's email changed adds no second administrator", async () => {
-  const renamed = await inDatabase((db) =>
-    db.query("UPDATE users SET email=$1 WHERE email=$2", [
-      renamedEmail,
-      bootstrap.ADMIN_EMAIL,
-    ]),
+  const renamed = await inDatabase(
+    (db) =>
+      db.query("UPDATE users SET email=$1 WHERE email=$2", [
+        renamedEmail,
+        bootstrap.ADMIN_EMAIL,
+      ]),
+    dir,
   );
   assert.equal(renamed.affectedRows, 1);
 
-  const result = await runScript("seed", bootstrap);
+  const result = await runScript("seed", bootstrap, dir);
   assert.equal(result.code, 0, result.stderr);
-  const { rows } = await inDatabase((db) =>
-    db.query("SELECT email FROM users WHERE role='admin'"),
+  const { rows } = await inDatabase(
+    (db) => db.query("SELECT email FROM users WHERE role='admin'"),
+    dir,
   );
   assert.deepEqual(rows, [{ email: renamedEmail }]);
 });
 
 test("seeding without ADMIN_EMAIL and ADMIN_PASSWORD skips the bootstrap once an administrator exists", async () => {
-  const result = await runScript("seed");
+  const result = await runScript("seed", {}, dir);
   assert.equal(result.code, 0, result.stderr);
   assert.ok(
     result.stdout.includes("Administrator already exists; bootstrap skipped."),
@@ -177,17 +123,20 @@ test("demo seeding attributes its audit entries to the earliest active administr
         "INSERT INTO users(id,email,name,role,password_hash,created_at) VALUES ($1,$2,'Administrator','admin','unused',now() + $3 * interval '1 hour')",
         [id, `${id}@operix.test`, hours],
       );
-  });
+  }, dir);
 
-  const result = await runScript("seed", {
-    SEED_DEMO: "1",
-    DEMO_PASSWORD: "Demo-test-password-123!",
-  });
+  const result = await runScript(
+    "seed",
+    { SEED_DEMO: "1", DEMO_PASSWORD: "Demo-test-password-123!" },
+    dir,
+  );
   assert.equal(result.code, 0, result.stderr);
-  const { rows } = await inDatabase((db) =>
-    db.query(
-      "SELECT DISTINCT user_id FROM audit_logs WHERE action='create' AND details->>'source'='synthetic demo seed'",
-    ),
+  const { rows } = await inDatabase(
+    (db) =>
+      db.query(
+        "SELECT DISTINCT user_id FROM audit_logs WHERE action='create' AND details->>'source'='synthetic demo seed'",
+      ),
+    dir,
   );
   assert.deepEqual(rows, [{ user_id: "earliest-active-admin" }]);
 });

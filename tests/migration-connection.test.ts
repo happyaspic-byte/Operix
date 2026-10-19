@@ -1,21 +1,19 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { Client } from "pg";
 import {
   connectForMigrations,
   MIGRATION_LOCK_KEY,
   migrationClientConfig,
 } from "../src/lib/db.ts";
+import { runScript } from "./helpers/script-db.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const postgresUrl = "postgresql://u:p@db:5432/operix";
-const run = promisify(execFile);
 const sessionSetup = [
   "SET TIME ZONE 'Asia/Seoul'",
   "SET statement_timeout = 0",
@@ -75,18 +73,6 @@ function fakePostgres(t: TestContext, ledger = new Map<string, string>()) {
   return { clients, sent, ledger };
 }
 
-function migratePglite(pglitePath: string) {
-  return run(process.execPath, ["--import", "tsx", "scripts/migrate.ts"], {
-    cwd: root,
-    env: {
-      ...process.env,
-      DATABASE_URL: "",
-      OPERIX_EMBEDDED: "1",
-      PGLITE_PATH: pglitePath,
-    },
-    timeout: 90000,
-  });
-}
 const applied = (lines: string[]) =>
   lines.filter((line) => line.startsWith("Applied "));
 
@@ -185,12 +171,14 @@ test(
       assert.equal(names[0], "001_initial.sql");
       assert.ok(names.includes("007_backup_replication.sql"));
 
-      const first = await migratePglite(dir);
+      const first = await runScript("migrate", {}, dir);
+      assert.equal(first.code, 0, first.stderr);
       assert.deepEqual(
         applied(first.stdout.split("\n")),
         names.map((name) => `Applied ${name}`),
       );
-      const second = await migratePglite(dir);
+      const second = await runScript("migrate", {}, dir);
+      assert.equal(second.code, 0, second.stderr);
       assert.deepEqual(applied(second.stdout.split("\n")), []);
     } finally {
       await rm(dir, { recursive: true, force: true });

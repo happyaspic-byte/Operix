@@ -1,12 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-import { PGlite } from "@electric-sql/pglite";
 import { errorSummary } from "../src/lib/error-log.ts";
 import { failure } from "../src/lib/http.ts";
 import {
@@ -15,9 +11,7 @@ import {
 } from "../src/lib/maintenance.ts";
 import { AppError } from "../src/lib/policy.ts";
 import { isolatedDatabase } from "./helpers/isolated-db.ts";
-
-const root = fileURLToPath(new URL("..", import.meta.url));
-const run = promisify(execFile);
+import { inDatabase, runScript } from "./helpers/script-db.ts";
 
 // Shaped like what pg and PGlite throw: detail, hint and the rest echo row data.
 function databaseError(
@@ -435,69 +429,27 @@ test("the fallback update releases the worker lease and flags the error in job_r
   }
 });
 
-// PGlite serves one process at a time: only call this while no script runs.
-async function inDatabase<T>(dir: string, fn: (db: PGlite) => Promise<T>) {
-  const db = new PGlite(dir);
-  try {
-    await db.waitReady;
-    return await fn(db);
-  } finally {
-    await db.close();
-  }
-}
-
-async function runScript(dir: string, ...args: string[]) {
-  try {
-    const { stdout, stderr } = await run(
-      process.execPath,
-      ["--import", "tsx", ...args],
-      {
-        cwd: root,
-        env: {
-          ...process.env,
-          CI: "true",
-          DATABASE_URL: "",
-          OPERIX_EMBEDDED: "1",
-          PGLITE_PATH: dir,
-          UPLOAD_DIR: join(dir, "uploads"),
-          SESSION_SECRET: "error-log-test-session-secret-0123456789abcdef",
-        },
-        timeout: 90000,
-      },
-    );
-    return { code: 0, stdout, stderr };
-  } catch (error: any) {
-    // A timeout or a failure to start is not a script exit status.
-    if (typeof error.code !== "number") throw error;
-    return {
-      code: error.code as number,
-      stdout: error.stdout as string,
-      stderr: error.stderr as string,
-    };
-  }
-}
-
 test(
   "the worker records which jobs failed, runs the rest and exits 1 with --once",
   { timeout: 240000 },
   async (t) => {
     const dir = await mkdtemp(join(tmpdir(), "operix-worker-"));
     t.after(() => rm(dir, { recursive: true, force: true }));
-    const migrated = await runScript(dir, "scripts/migrate.ts");
+    const migrated = await runScript("migrate", {}, dir);
     assert.equal(migrated.code, 0, migrated.stderr);
     // runJobs updates the scheduler row after the worker claimed its lease, so
     // only a heartbeat written when the pass ended is newer than that row.
     const workerState = () =>
       inDatabase(
-        dir,
         async (db) =>
           (
             await db.query(
               "SELECT w.last_error,w.last_success IS NOT NULL succeeded,w.started_at IS NULL released,w.heartbeat_at>s.updated_at renewed FROM job_runs w,job_runs s WHERE w.id='worker' AND s.id='scheduler'",
             )
           ).rows[0],
+        dir,
       );
-    await inDatabase(dir, async (db) => {
+    await inDatabase(async (db) => {
       await db.query(
         "INSERT INTO users(id,name,email,role,password_hash) VALUES('u1','Worker probe','worker-probe@operix.test','admin','unused')",
       );
@@ -509,9 +461,9 @@ test(
       await db.exec(
         "ALTER TABLE tickets RENAME TO tickets_off; ALTER TABLE privacy_requests RENAME TO privacy_requests_off",
       );
-    });
+    }, dir);
 
-    const failed = await runScript(dir, "scripts/worker.ts", "--once");
+    const failed = await runScript("worker", {}, dir, "--once");
     assert.equal(failed.code, 1, failed.stderr);
     const lines = failed.stderr
       .split("\n")
@@ -537,21 +489,23 @@ test(
     });
     // scanPendingDocuments still ran after both failures.
     const [scanned] = await inDatabase(
-      dir,
       async (db) =>
         (await db.query("SELECT scan_status,scan_error FROM documents")).rows,
+      dir,
     );
     assert.deepEqual(scanned, {
       scan_status: "error",
       scan_error: "file_unavailable",
     });
 
-    await inDatabase(dir, (db) =>
-      db.exec(
-        "ALTER TABLE tickets_off RENAME TO tickets; ALTER TABLE privacy_requests_off RENAME TO privacy_requests",
-      ),
+    await inDatabase(
+      (db) =>
+        db.exec(
+          "ALTER TABLE tickets_off RENAME TO tickets; ALTER TABLE privacy_requests_off RENAME TO privacy_requests",
+        ),
+      dir,
     );
-    const healthy = await runScript(dir, "scripts/worker.ts", "--once");
+    const healthy = await runScript("worker", {}, dir, "--once");
     assert.equal(healthy.code, 0, healthy.stderr);
     const completed = JSON.parse(
       healthy.stdout.split("\n").find((line) => line.startsWith("{")) ?? "{}",
