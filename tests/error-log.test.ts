@@ -301,10 +301,26 @@ test("a database failure is logged by identifiers only, without message, detail 
 test("expected failures answer without a log line", (t) => {
   const log = t.mock.method(console, "error", () => {});
   assert.equal(failure(new AppError(400, "x")).status, 400);
-  assert.equal(failure({ code: "55P03" }).status, 503);
   assert.equal(failure({ code: "23505" }).status, 409);
   assert.equal(failure({ code: "23503" }).status, 400);
   assert.equal(log.mock.callCount(), 0);
+});
+
+test("a lock timeout answers 503 and logs one line with only its request id", async (t) => {
+  const log = t.mock.method(console, "error", () => {});
+  const response = failure(
+    databaseError("55P03", "canceling statement due to lock timeout"),
+  );
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Retry-After"), "5");
+  const body = await response.json();
+  assert.equal(log.mock.callCount(), 1);
+  const text = String(log.mock.calls[0].arguments[0]);
+  assert.deepEqual(JSON.parse(text), {
+    event: "operix.request.lock_timeout",
+    request_id: body.request_id,
+  });
+  assert.doesNotMatch(text, /a@b\.c|users|lock timeout/);
 });
 
 test("a failing maintenance job is logged and the other jobs still run", async () => {

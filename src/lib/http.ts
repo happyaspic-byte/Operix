@@ -11,7 +11,14 @@ export function failure(error: unknown) {
       { status: error.status },
     );
   const code = (error as { code?: string })?.code;
-  if (code === "55P03")
+  if (code === "55P03") {
+    // A wedged lock otherwise leaves user reports and an empty log.
+    console.error(
+      JSON.stringify({
+        event: "operix.request.lock_timeout",
+        request_id: requestId,
+      }),
+    );
     return NextResponse.json(
       {
         error: "다른 작업을 처리 중입니다. 잠시 후 다시 시도해 주세요.",
@@ -19,6 +26,7 @@ export function failure(error: unknown) {
       },
       { status: 503, headers: { "Retry-After": "5" } },
     );
+  }
   if (code === "23505")
     return NextResponse.json(
       {
