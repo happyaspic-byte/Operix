@@ -1,10 +1,11 @@
 # Third-party notices
 
-Operix includes third-party npm packages and the Noto Sans KR font. Their rights remain with their respective authors. The table below records declarations in the installed packages/lockfile; it does not grant a license for company-authored Operix code.
+Operix includes third-party npm packages and the Noto Sans KR and Inter fonts. Their rights remain with their respective authors. The table below records declarations in the installed packages/lockfile; it does not grant a license for company-authored Operix code.
 
 | Direct runtime dependency | Version | Declared license | Included license |
 | --- | --- | --- | --- |
 | @electric-sql/pglite | 0.5.8 | Apache-2.0 | [LICENSE](docs/third-party/licenses/electric-sql_pglite-LICENSE) |
+| @fontsource-variable/inter | 5.3.0 | OFL-1.1 | [LICENSE](docs/third-party/licenses/fontsource-variable_inter-LICENSE) |
 | @fontsource/noto-sans-kr | 5.3.0 | OFL-1.1 | [LICENSE](docs/third-party/licenses/fontsource_noto-sans-kr-LICENSE) |
 | exceljs | 4.4.0 | MIT | [LICENSE](docs/third-party/licenses/exceljs-LICENSE) |
 | iron-session | 9.0.1 | MIT | [LICENSE.md](docs/third-party/licenses/iron-session-LICENSE.md) |

@@ -80,6 +80,7 @@ FILE_SCAN_MODE=test E2E_START_SERVER=1 npm run test:e2e
 ## 문서
 
 - [개발 계획](docs/PLAN.md)
+- [화면 디자인 기준](docs/DESIGN.md)
 - [이번 개선 항목 추적](docs/IMPROVEMENTS-2026-09-05.md)
 - [검증 결과와 평가](docs/VERIFICATION.md)
 - [2026-09-08 worktree 통합 기록](docs/INTEGRATION-2026-09-08.md)

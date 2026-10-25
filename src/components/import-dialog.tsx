@@ -174,7 +174,12 @@ export function ImportDialog({
               검토 대상 {preview.rows.length}행 · 오류{" "}
               {preview.rows.filter((r: any) => r.action === "error").length}행
             </div>
-            <div className="table-scroll">
+            <div
+              className="table-scroll"
+              role="region"
+              aria-label="가져오기 미리보기 표 · 가로 스크롤 가능"
+              tabIndex={0}
+            >
               <table>
                 <thead>
                   <tr>

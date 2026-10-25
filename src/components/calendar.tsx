@@ -5,7 +5,8 @@ import { api, ErrorNotice, Badge } from "./ui";
 import { Pager } from "./documents";
 import { todayKST, addDays, recurringDate } from "@/lib/dates";
 export function Calendar() {
-  const [date, setDate] = useState(todayKST()),
+  const today = todayKST();
+  const [date, setDate] = useState(today),
     [view, setView] = useState("month"),
     [page, setPage] = useState(1),
     [data, setData] = useState<{ rows: any[]; total: number }>({
@@ -99,7 +100,19 @@ export function Calendar() {
         <div className="calendar-scroll">
           <div className="calendar-grid">
             {Array.from({ length }, (_, i) => addDays(start, i)).map((day) => (
-              <div className="calendar-day" key={day}>
+              <div
+                className={[
+                  "calendar-day",
+                  day === today ? "today" : "",
+                  view === "month" && day.slice(0, 7) !== date.slice(0, 7)
+                    ? "outside"
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                aria-current={day === today ? "date" : undefined}
+                key={day}
+              >
                 <strong>
                   {day.slice(5)}{" "}
                   {

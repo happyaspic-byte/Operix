@@ -6,10 +6,14 @@ import {
   LayoutDashboard,
   Building2,
   Server,
-  Files,
+  FilePenLine,
+  FileText,
   CalendarDays,
   LifeBuoy,
-  Settings2,
+  Settings,
+  ShieldCheck,
+  CircleUserRound,
+  ChevronRight,
   Search,
   Bell,
   LogOut,
@@ -25,10 +29,19 @@ const nav = [
   { href: "dashboard", label: "대시보드", icon: LayoutDashboard },
   { href: "customers", label: "고객·사업장", icon: Building2 },
   { href: "assets", label: "자산 관리", icon: Server },
-  { href: "contracts", label: "계약·지원", icon: Files },
+  { href: "contracts", label: "계약·지원", icon: FilePenLine },
   { href: "inspections", label: "점검·일정", icon: CalendarDays },
   { href: "tickets", label: "장애·작업", icon: LifeBuoy },
-  { href: "documents", label: "문서·보고서", icon: Files },
+  { href: "documents", label: "문서·보고서", icon: FileText },
+];
+// Pages outside the main menu still get a meaningful breadcrumb title.
+const extraTitles: [string, string][] = [
+  ["/calendar", "점검 일정"],
+  ["/reports", "문서·보고서"],
+  ["/notifications", "알림"],
+  ["/security", "접속기록 점검"],
+  ["/account", "내 계정"],
+  ["/settings", "설정"],
 ];
 export function Shell({
   user,
@@ -51,11 +64,8 @@ export function Shell({
     [searchError, setSearchError] = useState("");
   const current =
     nav.find((n) => pathname.startsWith("/" + n.href))?.label ||
-    (pathname.startsWith("/settings")
-      ? "설정"
-      : pathname.startsWith("/reports")
-        ? "문서·보고서"
-        : "업무 공간");
+    extraTitles.find(([path]) => pathname.startsWith(path))?.[1] ||
+    "업무 공간";
   useEffect(() => {
     setMenu(false);
     setQ("");
@@ -226,40 +236,38 @@ export function Shell({
               >
                 <n.icon size={19} strokeWidth={1.8} />
                 <span>{n.label}</span>
-                {pathname.startsWith("/" + n.href) && (
-                  <span className="nav-active-dot" />
-                )}
               </Link>
             ))}
           </nav>
           <div className="sidebar-footer">
-            <Link className="nav-item" href="/notifications">
-              <Bell size={19} />
-              <span>알림 전체 보기</span>
-            </Link>
-            {["admin", "manager"].includes(user.role) && (
-              <Link className="nav-item" href="/security">
-                <Files size={19} />
-                <span>접속기록 점검</span>
-              </Link>
-            )}
-            <Link className="nav-item" href="/account">
-              <Settings2 size={19} />
-              <span>내 계정</span>
-            </Link>
-            <div className="workspace-health">
-              <span className="status-dot" />
-              <span>고객과 업무를 연결하는 공간</span>
-            </div>
-            {user.role === "admin" && (
+            {[
+              { href: "/notifications", label: "알림 전체 보기", icon: Bell },
+              ...(["admin", "manager"].includes(user.role)
+                ? [
+                    {
+                      href: "/security",
+                      label: "접속기록 점검",
+                      icon: ShieldCheck,
+                    },
+                  ]
+                : []),
+              { href: "/account", label: "내 계정", icon: CircleUserRound },
+              ...(user.role === "admin"
+                ? [{ href: "/settings", label: "설정", icon: Settings }]
+                : []),
+            ].map((item) => (
               <Link
-                className={`nav-item ${pathname === "/settings" ? "active" : ""}`}
-                href="/settings"
+                key={item.href}
+                className={`nav-item ${pathname.startsWith(item.href) ? "active" : ""}`}
+                aria-current={
+                  pathname.startsWith(item.href) ? "page" : undefined
+                }
+                href={item.href}
               >
-                <Settings2 size={19} />
-                <span>설정</span>
+                <item.icon size={19} strokeWidth={1.8} />
+                <span>{item.label}</span>
               </Link>
-            )}
+            ))}
             <div className="profile">
               <span className="avatar">{user.name.slice(0, 1)}</span>
               <div>
@@ -290,7 +298,9 @@ export function Shell({
                 <Menu size={20} />
               </button>
               <span>Workspace</span>
-              <b>/</b>
+              <b aria-hidden="true">
+                <ChevronRight size={14} />
+              </b>
               <strong>{current}</strong>
             </div>
             <div className="topbar-actions">

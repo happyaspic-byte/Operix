@@ -35,7 +35,7 @@ export function Account() {
         <div className="panel-heading">
           <h2>내 정보</h2>
         </div>
-        <dl className="detail-grid">
+        <dl className="detail-fields">
           {[
             ["이름", data.user.name],
             ["이메일", data.user.email],
