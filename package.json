@@ -38,7 +38,7 @@
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
     "@playwright/test": "1.62.1",
-    "@sparticuz/chromium": "149.0.0",
+    "@sparticuz/chromium": "153.0.0",
     "@types/node": "24.13.6",
     "@types/pg": "8.23.1",
     "@types/react": "19.2.18",
