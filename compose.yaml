@@ -29,7 +29,7 @@
         "-ec"
       ],
       "environment": {
-        "DEPLOYMENT_ID": "37b5465752935c5e53b8c16bdd20ecbc978af9b9-39198178706",
+        "DEPLOYMENT_ID": "dda989c5cb6e2064c25a26420d2a166e6609fb89-40190447514",
         "PGDATABASE": "operix",
         "PGHOST": "db",
         "PGPASSWORD": "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}",
@@ -101,7 +101,7 @@
       },
       "image": "postgres@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0",
       "labels": {
-        "operix.deployment": "37b5465752935c5e53b8c16bdd20ecbc978af9b9-39198178706"
+        "operix.deployment": "dda989c5cb6e2064c25a26420d2a166e6609fb89-40190447514"
       },
       "logging": {
         "driver": "json-file",
@@ -177,7 +177,7 @@
         "UPLOAD_STORAGE_LIMIT_MB": "${UPLOAD_STORAGE_LIMIT_MB:-10240}",
         "WORKER_REQUIRED": "1"
       },
-      "image": "ghcr.io/happyaspic-byte/operix@sha256:5126794a29a89b2d317311a14516b445b1c2b911e0bbe8f9923ea9da9ac1df98",
+      "image": "ghcr.io/happyaspic-byte/operix@sha256:5bd97318a4d5e2d46f6a743698f8748ca134467e80972984993a71047a7948c7",
       "init": true,
       "logging": {
         "driver": "json-file",
@@ -273,7 +273,7 @@
         ],
         "timeout": "5s"
       },
-      "image": "ghcr.io/happyaspic-byte/operix@sha256:5126794a29a89b2d317311a14516b445b1c2b911e0bbe8f9923ea9da9ac1df98",
+      "image": "ghcr.io/happyaspic-byte/operix@sha256:5bd97318a4d5e2d46f6a743698f8748ca134467e80972984993a71047a7948c7",
       "init": true,
       "logging": {
         "driver": "json-file",
@@ -340,7 +340,7 @@
         "UPLOAD_STORAGE_LIMIT_MB": "${UPLOAD_STORAGE_LIMIT_MB:-10240}",
         "WORKER_REQUIRED": "1"
       },
-      "image": "ghcr.io/happyaspic-byte/operix@sha256:5126794a29a89b2d317311a14516b445b1c2b911e0bbe8f9923ea9da9ac1df98",
+      "image": "ghcr.io/happyaspic-byte/operix@sha256:5bd97318a4d5e2d46f6a743698f8748ca134467e80972984993a71047a7948c7",
       "init": true,
       "logging": {
         "driver": "json-file",
