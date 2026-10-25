@@ -1536,18 +1536,18 @@ a.primary-cell:not(.record-name):hover {
   font-size: 14px;
 }
 .list-toolbar > select,
-.list-toolbar > input,
-.list-toolbar label input {
+.list-toolbar > input:not([type="checkbox"], [type="radio"]),
+.list-toolbar label input:not([type="checkbox"], [type="radio"]) {
   min-height: 36px;
   padding-top: 0;
   padding-bottom: 0;
   font-size: 14px;
 }
 .list-toolbar > select,
-.list-toolbar > input:not([type="date"]) {
+.list-toolbar > input:not([type="date"], [type="checkbox"], [type="radio"]) {
   border-radius: var(--radius-pill);
 }
-.list-toolbar > input:not([type="date"]) {
+.list-toolbar > input:not([type="date"], [type="checkbox"], [type="radio"]) {
   width: 260px;
   padding-left: 16px;
 }
@@ -1954,10 +1954,12 @@ label.form-field,
   gap: 8px;
   min-width: 0;
 }
-.form-field input,
+.form-field input:not([type="checkbox"], [type="radio"]),
 .form-field select,
 .form-field textarea,
-.form-grid > label:not([class]) :is(input, select, textarea) {
+.form-grid
+  > label:not([class])
+  :is(input:not([type="checkbox"], [type="radio"]), select, textarea) {
   width: 100%;
   color: var(--ink);
   font-size: 15px;
@@ -3152,7 +3154,7 @@ details.policy-item > form {
   .main-content > .list-toolbar {
     padding-bottom: 16px;
   }
-  .list-toolbar > input:not([type="date"]) {
+  .list-toolbar > input:not([type="date"], [type="checkbox"], [type="radio"]) {
     width: 100%;
   }
   .tabs {
@@ -3173,7 +3175,7 @@ details.policy-item > form {
   .form-field.full {
     grid-column: auto;
   }
-  .form-field input,
+  .form-field input:not([type="checkbox"], [type="radio"]),
   .form-field select,
   .form-field textarea {
     font-size: 16px;
