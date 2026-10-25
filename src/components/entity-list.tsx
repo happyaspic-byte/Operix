@@ -32,7 +32,8 @@ export function EntityList({ entity }: { entity: string }) {
     [page, setPage] = useState(1),
     [data, setData] = useState<any>(null),
     [error, setError] = useState(""),
-    [loading, setLoading] = useState(true),
+    [fetching, setFetching] = useState(true),
+    [loadedKey, setLoadedKey] = useState(""),
     [editor, setEditor] = useState(false),
     [importer, setImporter] = useState(false),
     [revision, setRevision] = useState(0),
@@ -83,6 +84,10 @@ export function EntityList({ entity }: { entity: string }) {
           ? "end_date"
           : "created_at",
   });
+  // The request the current filters need. Until its response arrives the list
+  // stays busy, so a filter change never renders the previous result (or its
+  // empty state) for a frame before the new request starts.
+  const requestKey = filters.toString() + "#" + revision;
   useEffect(() => {
     if (ready)
       window.history.replaceState(
@@ -106,8 +111,9 @@ export function EntityList({ entity }: { entity: string }) {
   ]);
   useEffect(() => {
     if (!ready) return;
-    const c = new AbortController();
-    setLoading(true);
+    const c = new AbortController(),
+      key = requestKey;
+    setFetching(true);
     setError("");
     const timer = setTimeout(
       () => {
@@ -124,7 +130,9 @@ export function EntityList({ entity }: { entity: string }) {
             }
           })
           .finally(() => {
-            if (!c.signal.aborted) setLoading(false);
+            if (c.signal.aborted) return;
+            setLoadedKey(key);
+            setFetching(false);
           });
       },
       query ? 200 : 0,
@@ -194,6 +202,7 @@ export function EntityList({ entity }: { entity: string }) {
     setPage(1);
     setData(null);
   }
+  const loading = fetching || loadedKey !== requestKey;
   const filtered = Boolean(query || status || mine || from || to || expiry);
   const statusField = config.fields.find((f) => f.key === "status");
   const tabs =

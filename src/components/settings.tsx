@@ -284,7 +284,12 @@ export function Settings() {
           <h2>최근 감사 기록</h2>
           <Activity size={18} />
         </div>
-        <div className="table-scroll">
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label="최근 감사 기록 표 · 가로 스크롤 가능"
+          tabIndex={0}
+        >
           <table>
             <thead>
               <tr>
