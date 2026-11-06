@@ -157,50 +157,70 @@ test("asset, component and VM diffs, comparison, permission, validation and eras
         assetHistory(asset.id, user, new URLSearchParams(q)),
         (e: unknown) => e instanceof AppError && e.status === 400,
       );
-    const target = crypto.randomUUID();
+    const target: User = {
+      id: crypto.randomUUID(),
+      email: "erase-history@example.test",
+      name: "Synthetic Erased Name",
+      role: "engineer",
+      active: true,
+    };
     await isolated.db.query(
-      "INSERT INTO users(id,email,name,role,password_hash) VALUES ($1,$2,$3,'viewer','unused')",
-      [target, "erase-history@example.test", "Synthetic Erased Name"],
-    );
-    await isolated.db.query(
-      "UPDATE privacy_policies SET purpose='Synthetic verification',lawful_basis='Synthetic request',retention_days=30,approved_by=$1,approved_at=now() WHERE resource_kind='users'",
-      [user.id],
+      "INSERT INTO users(id,email,name,role,password_hash) VALUES ($1,$2,$3,$4,'unused')",
+      [target.id, target.email, target.name, target.role],
     );
     await saveRecord(
       "assets",
-      user,
+      target,
       {
         site_id: site.id,
-        name: "New asset",
+        name: "Technician asset",
         product: "Server",
-        notes: "Synthetic Erased Name",
         version: asset.version + 1,
       },
       asset.id,
     );
+    const beforeErasure = await assetHistory(
+      asset.id,
+      user,
+      new URLSearchParams(),
+    );
+    assert.ok(
+      beforeErasure.events.some((event) => event.actor === target.name),
+    );
+    await isolated.db.query("UPDATE users SET active=false WHERE id=$1", [
+      target.id,
+    ]);
+    await isolated.db.query(
+      "UPDATE privacy_policies SET purpose='Synthetic verification',lawful_basis='Synthetic request',retention_days=30,approved_by=$1,approved_at=now() WHERE resource_kind='users'",
+      [user.id],
+    );
     const preview = await previewErasure(
       user,
       "users",
-      target,
+      target.id,
       "Synthetic erasure request",
       "Synthetic lawful basis",
     );
     await executeErasure(user, preview.id);
-    await saveRecord(
-      "assets",
-      user,
-      {
-        site_id: site.id,
-        name: "New asset",
-        product: "Server",
-        notes: "Synthetic Erased Name",
-        version: asset.version + 2,
-      },
-      asset.id,
-    );
     const erased = await assetHistory(asset.id, user, new URLSearchParams());
     assert.ok(!JSON.stringify(erased).includes("Synthetic Erased Name"));
-    assert.ok(erased.events.some((event) => event.redacted));
+    assert.ok(
+      erased.events.some(
+        (event) =>
+          event.actor === `파기-${target.id.slice(0, 8)}` && event.redacted,
+      ),
+    );
+    assert.ok(
+      erased.events.some((event) =>
+        event.diffs.some(
+          (diff) =>
+            diff.key === "name" &&
+            diff.before === "Old asset" &&
+            diff.after === "New asset",
+        ),
+      ),
+    );
+    assert.ok(!JSON.stringify(erased).includes(target.email));
   } finally {
     await isolated.close();
     if (old === undefined) delete process.env.SECURITY_LOG_DIR;
