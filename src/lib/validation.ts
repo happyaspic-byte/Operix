@@ -50,6 +50,7 @@ export function validateEntity(
             (v) => (v === "" || v === undefined ? null : v),
             z.string().uuid().nullable(),
           );
+    else if (field.type === "boolean") schema = z.boolean().default(false);
     else if (field.type === "number")
       schema = z.preprocess(
         (v) =>

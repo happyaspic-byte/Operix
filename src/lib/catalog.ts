@@ -8,6 +8,7 @@ export type Field = {
     | "select"
     | "date"
     | "number"
+    | "boolean"
     | "relation"
     | "assets"
     | "checklist";
@@ -513,6 +514,16 @@ catalog.customer_contacts = {
     { key: "site_id", label: "사업장", type: "relation", entity: "sites" },
     { key: "name", label: "이름", required: true },
     { key: "department", label: "부서" },
+    { key: "job_title", label: "직책" },
+    { key: "is_primary", label: "주 연락처", type: "boolean" },
+    {
+      key: "contact_priority",
+      label: "연락 우선순위",
+      type: "number",
+      min: 1,
+      max: 32767,
+    },
+    { key: "left_at", label: "퇴사일", type: "date" },
     {
       key: "contact_role",
       label: "연락 역할",

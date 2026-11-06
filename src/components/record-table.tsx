@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { ArrowUpRight, Server, Building2 } from "lucide-react";
 import { catalog, labelFor } from "@/lib/catalog";
-import { formatDate } from "@/lib/dates";
+import { formatDate, todayKST } from "@/lib/dates";
 import { Badge, Expiry, Empty } from "./ui";
 export function RecordTable({
   kind,
@@ -87,6 +87,24 @@ export function RecordTable({
                       )}
                       <span>
                         {row.name}
+                        {kind === "customer_contacts" && (
+                          <small>
+                            {row.is_primary && (
+                              <Badge value="active" label="주 연락처" />
+                            )}
+                            {row.contact_priority != null && (
+                              <Badge
+                                value="active"
+                                label={`우선순위 ${row.contact_priority}`}
+                              />
+                            )}
+                            {row.left_at &&
+                              String(row.left_at).slice(0, 10) <=
+                                todayKST() && (
+                                <Badge value="archived" label="퇴사" />
+                              )}
+                          </small>
+                        )}
                         {kind === "assets" && (
                           <small>
                             {row.model || row.software_version || "구성 확인"}
