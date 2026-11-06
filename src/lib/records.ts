@@ -130,12 +130,18 @@ export async function listRecords(
   }
   if (query.get("expiry") && kind === "contracts") {
     const choice = query.get("expiry")!;
-    if (choice === "overdue")
-      where.push("e.term='dated' AND e.end_date<CURRENT_DATE");
-    else if (choice === "30" || choice === "90")
-      where.push(
-        `e.term='dated' AND e.end_date BETWEEN CURRENT_DATE AND CURRENT_DATE+${choice === "30" ? 30 : 90}`,
-      );
+    // Date buckets match the dashboard tiles: active contracts with a dated
+    // term that are neither renewed nor ended.
+    const open =
+      "e.status='active' AND e.term='dated' AND e.renewal NOT IN ('renewed','ended')";
+    const ranges: Record<string, string> = {
+      overdue: "e.end_date<CURRENT_DATE",
+      "30": "e.end_date BETWEEN CURRENT_DATE AND CURRENT_DATE+30",
+      "31-90": "e.end_date BETWEEN CURRENT_DATE+31 AND CURRENT_DATE+90",
+      "90": "e.end_date BETWEEN CURRENT_DATE AND CURRENT_DATE+90",
+    };
+    if (Object.hasOwn(ranges, choice))
+      where.push(`${open} AND ${ranges[choice]}`);
     else if (["unknown", "perpetual"].includes(choice)) {
       params.push(choice);
       where.push(`e.term=$${params.length}`);
