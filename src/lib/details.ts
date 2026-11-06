@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { catalog } from "./catalog";
 import { getRecord, selection } from "./records";
 import { can, redact } from "./policy";
 import { pagination } from "./http";
@@ -149,7 +150,21 @@ export async function details(
     entries,
     documents,
     reports,
-    history,
+    history: history.map((entry) => {
+      if (!catalog[kind] || !entry.details) return entry;
+      const hidden = catalog[kind].fields.filter(
+        (field) => field.permission && !can(user.role, field.permission),
+      );
+      if (!hidden.length) return entry;
+      const details = { ...entry.details };
+      for (const side of ["before", "after"]) {
+        if (details[side]) {
+          details[side] = { ...details[side] };
+          for (const field of hidden) delete details[side][field.key];
+        }
+      }
+      return { ...entry, details };
+    }),
     totals,
     page: page.page,
     limit: page.limit,

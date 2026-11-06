@@ -2,6 +2,7 @@ import { assertRecordWritable } from "./record-state";
 import { getDb, type Database, type Row } from "./db";
 import { catalog } from "./catalog";
 import { audit, type User } from "./auth";
+import { historySnapshot } from "./asset-history";
 import { AppError, can, redact, requirePermission } from "./policy";
 import { validateEntity } from "./validation";
 import { pagination, queryDate, parseInput } from "./http";
@@ -639,10 +640,23 @@ export async function saveRecord(
         "DELETE FROM notifications WHERE source_kind=$1 AND source_id=$2",
         [kind, recordId],
       );
+    // Do not re-copy surviving source text into snapshots after an erasure.
+    const snapshot = ["assets", "components", "vms"].includes(kind)
+      ? await tx.query(
+          `SELECT * FROM ${kind} WHERE id=$1 AND NOT EXISTS (SELECT 1 FROM audit_logs WHERE entity_kind=$2 AND entity_id=$1 AND details->>'redacted'='true')`,
+          [recordId, kind],
+        )
+      : [];
     await audit(tx, user.id, id ? "update" : "create", kind, recordId, {
       fields: assetIds ? [...keys, "asset_ids"] : keys,
       version_before: previous?.version ?? null,
       version_after: previous ? previous.version + 1 : 1,
+      ...(snapshot.length
+        ? {
+            before: historySnapshot(kind, previous),
+            after: historySnapshot(kind, snapshot[0]),
+          }
+        : {}),
     });
     return getRecord(kind, recordId, user, tx);
   };
