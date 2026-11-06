@@ -148,6 +148,55 @@ test("component and VM selectors include unassigned assets but customer-bound se
   }
 });
 
+test("ALM placeholder serials fall back to the display-name ALM ID instead of a shared identity", async () => {
+  const file = alm([
+    [
+      "ze-p-90001 - ztC Edge 250i NFR",
+      "",
+      "Synthetic edge",
+      "|",
+      "ztCEdge",
+      "Synthetic edge site",
+      "Perpetual Service",
+      "2030-01-02",
+    ],
+    [
+      "ze-p-90002 - ztC Edge 250i NFR",
+      "",
+      "Synthetic edge",
+      "|",
+      "ztCEdge",
+      "Synthetic edge site",
+      "Perpetual Service",
+      "2030-01-02",
+    ],
+  ]);
+  const preview = await previewImport(user, "assets", file);
+  assert.equal(preview.valid, true, JSON.stringify(preview.rows));
+  assert.deepEqual(await commitImport(user, preview.batch_id), {
+    count: 2,
+    created: 2,
+    updated: 0,
+  });
+  const saved = await isolated.db.query(
+    "SELECT asset_tag,serial FROM assets WHERE asset_tag LIKE 'ze-p-9000%' ORDER BY asset_tag",
+  );
+  assert.deepEqual(
+    saved.map((row) => [row.asset_tag, row.serial || ""]),
+    [
+      ["ze-p-90001", ""],
+      ["ze-p-90002", ""],
+    ],
+  );
+  const repeat = await previewImport(user, "assets", file);
+  assert.equal(repeat.valid, true, JSON.stringify(repeat.rows));
+  assert.deepEqual(await commitImport(user, repeat.batch_id), {
+    count: 2,
+    created: 0,
+    updated: 2,
+  });
+});
+
 test("51 ALM rows in 18 unmatched groups persist visibly without creating organizations", async () => {
   const file = alm(
     Array.from({ length: 51 }, (_, i) => [
@@ -551,5 +600,101 @@ test("explicit ALM site references stay errors and newly archived targets invali
         a.id,
       ),
     (e: unknown) => e instanceof AppError && e.status === 400,
+  );
+});
+
+test("ALM updates keep curated names, sites and products and match assets registered by ALM ID", async () => {
+  const customer = await saveRecord("customers", user, {
+    name: "Curated ALM customer",
+  });
+  const site = await saveRecord("sites", user, {
+    name: "Curated ALM site",
+    customer_id: customer.id,
+  });
+  const curated = await saveRecord("assets", user, {
+    name: "RCP-Server",
+    asset_tag: "ee-90010",
+    product: "everRun",
+    site_id: site.id,
+  });
+  const pair = await saveRecord("assets", user, {
+    name: "Edge pair",
+    asset_tag: "ze-p-90020",
+    product: "ztC Edge",
+    site_id: site.id,
+  });
+  const endurance = await saveRecord("assets", user, {
+    name: "MES DB",
+    asset_tag: "zen90030",
+    serial: "F900SYNTHETIC",
+    product: "ztC Endurance",
+    site_id: site.id,
+  });
+  const file = alm([
+    [
+      "ee-90010 - everRun Enterprise",
+      "",
+      "Synthetic ALM",
+      "ee-90010",
+      "everRun Enterprise",
+      "Synthetic ALM site",
+      "everRun Support",
+      "2030-01-02",
+    ],
+    [
+      "ze-p-90020 - ztC Edge 250i NFR",
+      "",
+      "Synthetic ALM",
+      "ACO90021|ACO90022",
+      "ztCEdge",
+      "Synthetic ALM site",
+      "Perpetual Service",
+      "2030-01-02",
+    ],
+    [
+      "zen90030 - ztC Endurance 3110",
+      "",
+      "Synthetic ALM",
+      "F900SYNTHETIC",
+      "windows",
+      "Synthetic ALM site",
+      "Platform Support",
+      "2030-01-02",
+    ],
+    [
+      "zen90040 - ztC Endurance 3110",
+      "",
+      "Synthetic ALM",
+      "F900NEWUNIT",
+      "windows",
+      "Synthetic ALM site",
+      "Platform Support",
+      "2030-01-02",
+    ],
+  ]);
+  const preview = await previewImport(user, "assets", file);
+  assert.equal(preview.valid, true, JSON.stringify(preview.rows));
+  assert.deepEqual(await commitImport(user, preview.batch_id), {
+    count: 4,
+    created: 1,
+    updated: 3,
+  });
+  for (const [before, name, product] of [
+    [curated, "RCP-Server", "everRun"],
+    [pair, "Edge pair", "ztC Edge"],
+    [endurance, "MES DB", "ztC Endurance"],
+  ] as const) {
+    const after = await getRecord("assets", before.id, user);
+    assert.equal(after.name, name);
+    assert.equal(after.product, product);
+    assert.equal(after.site_id, site.id);
+    assert.match(after.notes, /ALM 지원 권한/);
+  }
+  const [created] = await isolated.db.query(
+    "SELECT name,product,site_id FROM assets WHERE asset_tag='F900NEWUNIT'",
+  );
+  assert.deepEqual(
+    [created.name, created.product, created.site_id],
+    ["zen90040 - ztC Endurance 3110", "ztC Endurance", null],
   );
 });
