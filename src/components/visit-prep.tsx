@@ -31,25 +31,57 @@ type Sheet = {
 export function VisitPrep({ id }: { id: string }) {
   const [data, setData] = useState<Sheet | null>(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     api("/api/visit-prep/" + encodeURIComponent(id))
       .then(setData)
       .catch((e) => setError(e.message));
   }, [id]);
   async function toggle(item: Item) {
-    setBusy(true);
+    setBusy((current) => new Set(current).add(item.key));
     setError("");
+    setData((current) =>
+      current && {
+        ...current,
+        checks: current.checks.map((check) =>
+          check.key === item.key ? { ...check, checked: !item.checked } : check,
+        ),
+      },
+    );
     try {
       const result = await api("/api/visit-prep/" + encodeURIComponent(id), {
         method: "PATCH",
         body: JSON.stringify({ item_key: item.key, checked: !item.checked }),
       });
-      setData((current) => current && { ...current, checks: result.checks });
+      const saved = (result.checks as Item[]).find(
+        (check) => check.key === item.key,
+      );
+      setData((current) =>
+        current && saved
+          ? {
+              ...current,
+              checks: current.checks.map((check) =>
+                check.key === item.key ? saved : check,
+              ),
+            }
+          : current,
+      );
     } catch (e) {
+      setData((current) =>
+        current && {
+          ...current,
+          checks: current.checks.map((check) =>
+            check.key === item.key ? item : check,
+          ),
+        },
+      );
       setError(e instanceof Error ? e.message : "저장하지 못했습니다.");
     } finally {
-      setBusy(false);
+      setBusy((current) => {
+        const next = new Set(current);
+        next.delete(item.key);
+        return next;
+      });
     }
   }
   if (!data) return error ? <ErrorNotice message={error} /> : <Loading />;
@@ -96,7 +128,7 @@ export function VisitPrep({ id }: { id: string }) {
               <input
                 type="checkbox"
                 checked={item.checked}
-                disabled={!data.can_edit || busy}
+                disabled={!data.can_edit || busy.has(item.key)}
                 onChange={() => toggle(item)}
               />{" "}
               {item.label}

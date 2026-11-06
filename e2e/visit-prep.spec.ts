@@ -38,7 +38,14 @@ test("방문 준비 체크 항목은 새로고침 후에도 유지됩니다", as
   await page.goto("/inspections/" + inspection.id);
   await page.getByRole("link", { name: "방문 준비표" }).click();
   const checkbox = page.getByRole("checkbox", { name: "담당자 연락 확인" });
+  const saved = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/visit-prep/") &&
+      response.request().method() === "PATCH" &&
+      response.ok(),
+  );
   await checkbox.check();
+  await saved;
   await expect(checkbox).toBeChecked();
   await page.reload();
   await expect(checkbox).toBeChecked();
