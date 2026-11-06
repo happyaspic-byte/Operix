@@ -35,9 +35,13 @@ export function guardSpreadsheetArchive(bytes: Buffer) {
       bytes.readUInt16LE(offset + 32);
   }
 }
-export async function parseSheet(
-  file: File,
-): Promise<Record<string, string>[]> {
+export async function parseSheetDetailed(file: File): Promise<
+  {
+    values: Record<string, string>;
+    original: Record<string, string>;
+    row: number;
+  }[]
+> {
   if (file.size > 5 * 1024 * 1024)
     throw new AppError(413, "가져오기 파일은 5MB 이하로 선택해 주세요.");
   const workbook = new ExcelJS.Workbook();
@@ -71,14 +75,28 @@ export async function parseSheet(
   sheet.getRow(1).eachCell((cell, i) => {
     headers[i] = cell.text.trim();
   });
-  const rows: Record<string, string>[] = [];
+  const rows: {
+    values: Record<string, string>;
+    original: Record<string, string>;
+    row: number;
+  }[] = [];
   for (let n = 2; n <= sheet.rowCount; n++) {
-    const row: Record<string, string> = {};
+    const values: Record<string, string> = {};
+    const original: Record<string, string> = {};
     for (let i = 1; i < headers.length; i++)
-      if (headers[i]) row[headers[i]] = sheet.getRow(n).getCell(i).text.trim();
-    if (Object.values(row).some(Boolean)) rows.push(row);
+      if (headers[i] && !["행 번호", "오류"].includes(headers[i])) {
+        original[headers[i]] = sheet.getRow(n).getCell(i).text;
+        values[headers[i]] = original[headers[i]].trim();
+      }
+    if (Object.values(values).some(Boolean))
+      rows.push({ values, original, row: n });
   }
   return rows;
+}
+export async function parseSheet(
+  file: File,
+): Promise<Record<string, string>[]> {
+  return (await parseSheetDetailed(file)).map((row) => row.values);
 }
 export async function workbookBytes(
   rows: Record<string, any>[],

@@ -17,15 +17,35 @@ import {
   importMapping,
   previewImport,
   commitImport,
+  importFailureBytes,
 } from "@/lib/imports";
 import { securityLog } from "@/lib/security";
 export async function GET(request: Request) {
   try {
-    const u = await requireUser(),
-      kind = parseInput(
-        z.enum(importKinds),
-        new URL(request.url).searchParams.get("kind") || "assets",
+    const u = await requireUser();
+    const params = new URL(request.url).searchParams;
+    if (params.has("failures")) {
+      const format = parseInput(
+        z.enum(["csv", "xlsx"]),
+        params.get("failures"),
       );
+      const id = parseInput(z.string().uuid(), params.get("preview"));
+      const bytes = await importFailureBytes(u, id, format);
+      return new NextResponse(bytes, {
+        headers: {
+          "Content-Type":
+            format === "csv"
+              ? "text/csv; charset=utf-8"
+              : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="operix-import-failures.${format}"`,
+          "Cache-Control": "private, no-store",
+        },
+      });
+    }
+    const kind = parseInput(
+      z.enum(importKinds),
+      params.get("kind") || "assets",
+    );
     requirePermission(u.role, catalog[kind].permission);
     const [site] = await (
         await getDb()
