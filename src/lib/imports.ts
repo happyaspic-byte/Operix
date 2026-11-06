@@ -5,7 +5,7 @@ import { validateEntity } from "./validation";
 import { getRecord, saveRecord } from "./records";
 import { AppError, requirePermission, can } from "./policy";
 import { parseInput } from "./http";
-import { parseSheet } from "./sheets";
+import { parseSheetDetailed, safeCsv, workbookBytes } from "./sheets";
 import { scanBytes } from "./file-scanner";
 import { audit, type User } from "./auth";
 import { lockBusiness } from "./transactions";
@@ -61,7 +61,8 @@ export async function previewImport(
       423,
       "검사가 완료되지 않았거나 위험한 가져오기 파일입니다.",
     );
-  const rows = await parseSheet(file),
+  const parsed = await parseSheetDetailed(file),
+    rows = parsed.map((row) => row.values),
     db = await getDb(),
     result: Row[] = [],
     seen = new Set<string>(),
@@ -420,7 +421,7 @@ export async function previewImport(
           after: data[k],
         }));
       result.push({
-        row: i + 2,
+        row: parsed[i].row,
         action: existing ? "update" : "create",
         id: existing?.id,
         version: existing?.version,
@@ -432,8 +433,9 @@ export async function previewImport(
       });
     } catch (e) {
       result.push({
-        row: i + 2,
+        row: parsed[i].row,
         action: "error",
+        original: Object.entries(parsed[i].original),
         name: rows[i][mapping.name] || "",
         error:
           e instanceof AppError
@@ -454,10 +456,68 @@ export async function previewImport(
     site_groups: siteGroups,
     sites: availableSites,
     rows: result.map(
-      ({ data: _data, alm_identity: _identity, ...rest }) => rest,
+      ({
+        data: _data,
+        alm_identity: _identity,
+        original: _original,
+        ...rest
+      }) => rest,
     ),
     valid: result.every((r) => r.action !== "error"),
   };
+}
+export async function importFailureBytes(
+  user: User,
+  id: string,
+  format: "csv" | "xlsx",
+) {
+  const [batch] = await (
+    await getDb()
+  ).query("SELECT * FROM import_batches WHERE id=$1 AND user_id=$2", [
+    id,
+    user.id,
+  ]);
+  if (!batch) throw new AppError(404, "가져오기 작업을 찾을 수 없습니다.");
+  requirePermission(user.role, catalog[batch.entity_kind].permission);
+  if (batch.committed_at)
+    throw new AppError(404, "가져오기 작업을 찾을 수 없습니다.");
+  if (Date.parse(batch.expires_at) <= Date.now())
+    throw new AppError(410, "미리보기 유효 시간이 지났습니다.");
+  const failed = batch.payload.filter(
+    (row: Row) => row.action === "error" && row.original,
+  );
+  const headers: string[] = (failed[0]?.original || []).map(
+    ([header]: [string, string]) => header,
+  );
+  const columns: [string, string][] = [
+    ["row", "행 번호"],
+    ["error", "오류"],
+    ...headers.map((header, index): [string, string] => [
+      `column${index}`,
+      header,
+    ]),
+  ];
+  const rows = failed.map((row: Row) => ({
+    ...Object.fromEntries(
+      row.original.map(([, value]: [string, string], index: number) => [
+        `column${index}`,
+        value,
+      ]),
+    ),
+    row: row.row,
+    error: row.error,
+  }));
+  if (format === "csv")
+    return Buffer.from(
+      "\uFEFF" +
+        [
+          columns.map((column) => safeCsv(column[1])).join(","),
+          ...rows.map((row: Row) =>
+            columns.map((column) => safeCsv(row[column[0]])).join(","),
+          ),
+        ].join("\r\n"),
+    );
+  return workbookBytes(rows, columns);
 }
 export async function commitImport(user: User, id: string) {
   const db = await getDb();

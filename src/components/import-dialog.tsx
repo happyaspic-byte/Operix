@@ -174,6 +174,21 @@ export function ImportDialog({
               검토 대상 {preview.rows.length}행 · 오류{" "}
               {preview.rows.filter((r: any) => r.action === "error").length}행
             </div>
+            {preview.rows.some(
+              (r: { action: string }) => r.action === "error",
+            ) && (
+              <div className="import-summary">
+                {(["csv", "xlsx"] as const).map((format) => (
+                  <a
+                    key={format}
+                    className="button small"
+                    href={`/api/import?preview=${encodeURIComponent(preview.batch_id)}&failures=${format}`}
+                  >
+                    실패 행 내려받기 ({format.toUpperCase()})
+                  </a>
+                ))}
+              </div>
+            )}
             <div
               className="table-scroll"
               role="region"
