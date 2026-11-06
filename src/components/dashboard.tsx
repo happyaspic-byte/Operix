@@ -107,27 +107,67 @@ export function Dashboard() {
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <h2>만료 예정 계약</h2>
-                <p>90일 이내 종료 예정 및 지난 만료</p>
+                <h2>지원·계약 만료 현황</h2>
+                <p>남은 기간이 짧은 계약부터 표시합니다.</p>
               </div>
-              <Link className="text-link" href="/contracts">
-                전체 보기 <ArrowRight size={14} />
+              <Link className="text-link" href="/contracts?expiry=90">
+                90일 이내 전체 <ArrowRight size={14} />
               </Link>
             </div>
-            {data.contracts.length ? (
+            <div className="expiry-summary">
+              {[
+                {
+                  label: "30일 이내",
+                  value: data.expiry.counts.within30,
+                  tone: "warning",
+                  href: "/contracts?expiry=30",
+                },
+                {
+                  label: "31~90일",
+                  value: data.expiry.counts.within90,
+                  tone: "info",
+                  href: "/contracts?expiry=90",
+                },
+                {
+                  label: "만료됨",
+                  value: data.expiry.counts.expired,
+                  tone: "danger",
+                  href: "/contracts?expiry=overdue",
+                  detail: `지원 끊긴 자산 ${data.expiry.counts.expired_assets}대`,
+                },
+              ].map((s) => (
+                <Link
+                  key={s.label}
+                  href={s.href}
+                  className={`expiry-tile ${s.tone}`}
+                >
+                  <span>{s.label}</span>
+                  <strong>
+                    {s.value}
+                    <small>건</small>
+                  </strong>
+                  {s.detail && <small>{s.detail}</small>}
+                </Link>
+              ))}
+            </div>
+            {data.expiry.upcoming.length ? (
               <div className="table-scroll">
                 <table>
                   <thead>
                     <tr>
+                      <th>남은 기간</th>
                       <th>계약 / 고객사</th>
                       <th>구분</th>
+                      <th>자산</th>
                       <th>종료일</th>
-                      <th>남은 기간</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.contracts.map((c: any) => (
+                    {data.expiry.upcoming.map((c: any) => (
                       <tr key={c.id}>
+                        <td>
+                          <Expiry end={c.end_date} term={c.term} />
+                        </td>
                         <td>
                           <Link
                             className="primary-cell"
@@ -140,10 +180,8 @@ export function Dashboard() {
                         <td>
                           <Badge value={c.kind} />
                         </td>
+                        <td className="mono">{c.asset_count}대</td>
                         <td className="mono">{formatDate(c.end_date)}</td>
-                        <td>
-                          <Expiry end={c.end_date} term={c.term} />
-                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -151,9 +189,35 @@ export function Dashboard() {
               </div>
             ) : (
               <Empty
-                title="다가오는 만료가 없습니다."
+                title="90일 이내 만료 예정 계약이 없습니다."
                 description="계약을 등록하면 갱신 시점을 함께 확인할 수 있습니다."
               />
+            )}
+            {data.expiry.expired.length > 0 && (
+              <details className="expired-box">
+                <summary>
+                  이미 만료된 계약 {data.expiry.counts.expired}건 · 갱신 또는
+                  종료 처리가 필요합니다
+                </summary>
+                <ul>
+                  {data.expiry.expired.map((c: any) => (
+                    <li key={c.id}>
+                      <Link href={`/contracts/${c.id}`}>{c.name}</Link>
+                      <small>
+                        {c.customer_name} · 자산 {c.asset_count}대
+                      </small>
+                      <span className="badge danger">
+                        {dayDiff(data.today, c.end_date)}일 경과
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {data.expiry.counts.expired > data.expiry.expired.length && (
+                  <Link className="text-link" href="/contracts?expiry=overdue">
+                    만료 계약 전체 보기 <ArrowRight size={14} />
+                  </Link>
+                )}
+              </details>
             )}
           </section>
           <section className="panel">
