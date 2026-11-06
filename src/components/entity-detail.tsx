@@ -214,6 +214,11 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
         </div>
         <div className="heading-actions">
           {record.status && <Badge value={record.status} />}{" "}
+          {kind === "inspections" && !deleted && (
+            <Link className="button" href={"/visit-prep/" + id}>
+              방문 준비표
+            </Link>
+          )}
           {kind === "contracts" && (
             <Expiry end={record.end_date} term={record.term} />
           )}{" "}
