@@ -3348,7 +3348,8 @@ details.policy-item > form {
 }
 .expiry-tile span {
   font-size: 13px;
-  color: var(--ink-muted);
+  /* --ink-muted is 4.44:1 on the tinted tiles; --gray keeps AA contrast. */
+  color: var(--gray);
 }
 .expiry-tile strong {
   font-size: 26px;
@@ -3362,7 +3363,7 @@ details.policy-item > form {
 }
 .expiry-tile > small {
   font-size: 12px;
-  color: var(--ink-muted);
+  color: var(--gray);
 }
 .expiry-tile.warning {
   background: var(--orange-fill);
