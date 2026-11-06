@@ -78,6 +78,23 @@ export async function inventory(
   );
   const scopeIds = Object.values(scope).flat(),
     customerIds = kind === "customers" ? [id] : [];
+  // A moved asset can retain snapshots from a former customer. Include its
+  // historical asset and component logs without erasing the current records.
+  const historicalIds = [...scopeIds];
+  if (kind === "customers") {
+    const assets = await db.query(
+      "SELECT DISTINCT entity_id id FROM audit_logs WHERE entity_kind='assets' AND (details->'before'->>'site_id'=ANY($1::text[]) OR details->'after'->>'site_id'=ANY($1::text[]))",
+      [scope.sites],
+    );
+    const assetIds = [
+      ...new Set([...scope.assets, ...assets.map((r) => r.id)]),
+    ];
+    const children = await db.query(
+      "SELECT DISTINCT entity_id id FROM audit_logs WHERE entity_kind IN ('components','vms') AND (details->'before'->>'asset_id'=ANY($1::text[]) OR details->'after'->>'asset_id'=ANY($1::text[]))",
+      [assetIds],
+    );
+    historicalIds.push(...assetIds, ...children.map((r) => r.id));
+  }
   const held = await db.query(
     "SELECT id FROM privacy_holds WHERE active=true AND ((subject_kind=$1 AND subject_id=$2) OR (subject_kind='customers' AND subject_id=ANY($3::text[])))",
     [kind, id, customerIds],
@@ -127,8 +144,14 @@ export async function inventory(
   );
   await copy(
     "audit_logs",
-    "entity_id=ANY($1::text[]) OR ($2='users' AND user_id=$3)",
-    [scopeIds, kind, id],
+    "entity_id=ANY($1::text[]) OR ($2='users' AND (user_id=$3 OR position($3 in details::text)>0 OR position($4 in details::text)>0 OR position($5 in details::text)>0))",
+    [
+      historicalIds,
+      kind,
+      id,
+      subject.name || "__absent__",
+      subject.email || "__absent__",
+    ],
   );
   // Pending spreadsheets may contain unstructured copies; invalidate previews on erasure.
   await copy("import_batches", "payload<>'[]'::jsonb", []);

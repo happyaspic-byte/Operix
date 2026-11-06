@@ -29,6 +29,7 @@ import {
   defaultClassification,
 } from "@/lib/document-policy";
 import { RecordTable } from "./record-table";
+import { AssetHistory } from "./asset-history";
 const relationLabelKeys: Record<string, string> = {
   customer_id: "customer_name",
   site_id: "site_name",
@@ -634,7 +635,8 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
           )}
         </section>
       )}
-      {tab === "history" && (
+      {tab === "history" && kind === "assets" && <AssetHistory id={id} />}
+      {tab === "history" && kind !== "assets" && (
         <section className="panel">
           <div className="panel-heading">
             <h2>변경 이력</h2>
@@ -658,7 +660,7 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
         </section>
       )}
       {tab === "timeline" && <WorkStatus record={record} />}
-      {tab !== "overview" && (
+      {tab !== "overview" && !(tab === "history" && kind === "assets") && (
         <Pager
           page={page}
           total={
