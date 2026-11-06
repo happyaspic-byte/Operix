@@ -39,7 +39,7 @@ export async function details(
     totals[key] = count.total;
     return db.query(
       base +
-        ` ORDER BY created_at DESC,id LIMIT $${ps.length + 1} OFFSET $${ps.length + 2}`,
+        ` ORDER BY ${key === "customer_contacts" ? "is_primary DESC,contact_priority ASC NULLS LAST,name,id" : "created_at DESC,id"} LIMIT $${ps.length + 1} OFFSET $${ps.length + 2}`,
       [
         ...ps,
         page.limit,

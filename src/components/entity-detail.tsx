@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { catalog } from "@/lib/catalog";
 import { can } from "@/lib/policy";
-import { formatDate } from "@/lib/dates";
+import { formatDate, todayKST } from "@/lib/dates";
 import { api, useUser, Badge, ErrorNotice, Loading, Empty, Expiry } from "./ui";
 import { RecordEditor } from "./record-editor";
 import { WorkStatus } from "./work-status";
@@ -134,6 +134,13 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
   const relationshipTabs = Object.keys(data.related);
   function renderValue(f: any) {
     const v = record[f.key];
+    if (
+      kind === "customer_contacts" &&
+      f.key === "status" &&
+      record.left_at &&
+      String(record.left_at).slice(0, 10) <= todayKST()
+    )
+      return <Badge value="archived" label="퇴사" />;
     if (f.type === "assets")
       return (
         kind === "inspections" ? record.assets || [] : data.related.assets || []
@@ -168,6 +175,7 @@ export function EntityDetail({ kind, id }: { kind: string; id: string }) {
         label || "미지정"
       );
     }
+    if (f.type === "boolean") return v ? "예" : "아니요";
     if (f.type === "select")
       return (
         <Badge

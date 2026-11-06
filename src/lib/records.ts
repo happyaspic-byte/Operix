@@ -8,6 +8,7 @@ import { pagination, queryDate, parseInput } from "./http";
 import { z } from "zod";
 import { workflowFields } from "./workflow";
 import { lockBusiness } from "./transactions";
+import { todayKST } from "./dates";
 const customerJoin =
   " JOIN sites s ON s.id=a.site_id JOIN customers c ON c.id=s.customer_id";
 const assetLinks: Record<string, { table: string; key: string }> = {
@@ -380,6 +381,26 @@ export async function saveRecord(
           "다른 사용자가 수정했습니다. 새로고침 후 다시 확인해 주세요.",
         );
     }
+    if (kind === "customer_contacts") {
+      if (previous) {
+        for (const key of [
+          "is_primary",
+          "contact_priority",
+          "left_at",
+          "job_title",
+        ])
+          if (!Object.hasOwn(raw, key)) data[key] = previous[key];
+      }
+      if (
+        data.is_primary &&
+        data.left_at &&
+        String(data.left_at).slice(0, 10) <= todayKST()
+      )
+        throw new AppError(
+          400,
+          "퇴사한 담당자는 주 연락처로 지정할 수 없습니다.",
+        );
+    }
     if (kind === "inspections" && previous) {
       // A legacy client cannot see secondary targets, so only replace its
       // representative and retain the remaining links in the same transaction.
@@ -533,6 +554,16 @@ export async function saveRecord(
         "종결된 작업의 재개는 업무 관리자만 할 수 있습니다.",
       );
     await workflowFields(tx, kind, data, previous);
+    if (
+      kind === "customer_contacts" &&
+      data.is_primary &&
+      data.status === "active"
+    ) {
+      await tx.query(
+        "UPDATE customer_contacts SET is_primary=false,version=version+1,updated_at=now() WHERE customer_id=$1 AND status='active' AND is_primary=true AND id<>$2",
+        [data.customer_id, id || ""],
+      );
+    }
     const assetIds = data.asset_ids;
     delete data.asset_ids;
     const keys = Object.keys(data),
@@ -628,6 +659,7 @@ export async function lookups(query = new URLSearchParams(), user?: User) {
     assets: [],
     users: [],
     contracts: [],
+    customer_contacts: [],
   };
   if (user && currentKind && currentId) {
     const row = await getRecord(currentKind, currentId, user);
@@ -648,6 +680,8 @@ export async function lookups(query = new URLSearchParams(), user?: User) {
       "SELECT c.id,c.name,c.customer_id,c.status FROM contracts c WHERE c.privacy_erased_at IS NULL AND ((c.status='active' AND c.name ILIKE $1) OR c.id=ANY($2::text[]))",
     users:
       "SELECT id,name,role,CASE WHEN active THEN 'active' ELSE 'archived' END status FROM users WHERE privacy_erased_at IS NULL AND ((active=true AND name ILIKE $1) OR id=ANY($2::text[]))",
+    customer_contacts:
+      "SELECT id,name,customer_id,CASE WHEN status='archived' OR (left_at IS NOT NULL AND left_at <= (now() AT TIME ZONE 'Asia/Seoul')::date) THEN 'archived' ELSE 'active' END status FROM customer_contacts WHERE privacy_erased_at IS NULL AND ((status='active' AND (left_at IS NULL OR left_at > (now() AT TIME ZONE 'Asia/Seoul')::date) AND name ILIKE $1) OR id=ANY($2::text[]))",
   };
   // Only asset-local editors can select assets without a customer/site link.
   if (currentKind === "components" || currentKind === "vms")

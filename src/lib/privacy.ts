@@ -241,7 +241,7 @@ async function applyErasure(
       [id, pseudo],
     );
     await tx.query(
-      "UPDATE customer_contacts SET name='파기-'||id,department='',email='',phone='',notes='',status='archived',privacy_erased_at=now(),version=version+1,updated_at=now() WHERE id=ANY($1::text[])",
+      "UPDATE customer_contacts SET name='파기-'||id,department='',job_title=NULL,left_at=NULL,is_primary=false,email='',phone='',notes='',status='archived',privacy_erased_at=now(),version=version+1,updated_at=now() WHERE id=ANY($1::text[])",
       [scope.customer_contacts],
     );
     for (const table of [

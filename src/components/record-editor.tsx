@@ -46,13 +46,17 @@ export function RecordEditor({
         v =
           f.type === "assets" || f.type === "checklist"
             ? []
-            : f.type === "select"
-              ? f.options?.[0][0]
-              : f.type === "number"
-                ? f.key === "notice_days"
-                  ? 90
-                  : f.min || ""
-                : "";
+            : f.type === "boolean"
+              ? false
+              : f.type === "select"
+                ? f.options?.[0][0]
+                : f.type === "number"
+                  ? f.key === "notice_days"
+                    ? 90
+                    : f.key === "contact_priority"
+                      ? ""
+                      : f.min || ""
+                  : "";
       if (f.type === "date" && v) v = String(v).slice(0, 10);
       if (f.type === "select" && v) v = String(v);
       values[f.key] = v;
@@ -172,6 +176,16 @@ export function RecordEditor({
       "aria-invalid": Boolean(fieldErrors[id]),
       "aria-describedby": fieldErrors[id] ? id + "-error" : undefined,
     };
+    if (f.type === "boolean")
+      return (
+        <input
+          id={id}
+          {...accessibility}
+          type="checkbox"
+          checked={Boolean(value)}
+          onChange={(e) => update(f.key, e.target.checked)}
+        />
+      );
     if (f.type === "select" || f.type === "relation") {
       let choices =
         f.type === "select"
