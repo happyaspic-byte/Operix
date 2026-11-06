@@ -375,6 +375,18 @@ export async function previewImport(
         );
         delete input.name;
       }
+      if (
+        alm &&
+        matches.length &&
+        mapping.product === "u_asset_type" &&
+        matches[0].product &&
+        matches[0].product !== input.product
+      ) {
+        warnings.push(
+          `기존 제품 "${matches[0].product}"을 유지합니다. ALM 원본 자산 유형은 메모에 보존됩니다.`,
+        );
+        delete input.product;
+      }
       if (matches.length > 1)
         throw new AppError(
           400,

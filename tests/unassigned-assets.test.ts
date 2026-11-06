@@ -614,7 +614,8 @@ test("ALM updates keep curated names, sites and products and match assets regist
   const curated = await saveRecord("assets", user, {
     name: "RCP-Server",
     asset_tag: "ee-90010",
-    product: "everRun",
+    // Curated as a general server although ALM infers everRun.
+    product: "Server",
     site_id: site.id,
   });
   const pair = await saveRecord("assets", user, {
@@ -680,7 +681,7 @@ test("ALM updates keep curated names, sites and products and match assets regist
     updated: 3,
   });
   for (const [before, name, product] of [
-    [curated, "RCP-Server", "everRun"],
+    [curated, "RCP-Server", "Server"],
     [pair, "Edge pair", "ztC Edge"],
     [endurance, "MES DB", "ztC Endurance"],
   ] as const) {
