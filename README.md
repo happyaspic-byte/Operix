@@ -18,6 +18,14 @@
 - 관리자·업무 관리자·기술지원·영업·조회 전용 역할, 서버 권한 검사.
 - 로그인 세션 회수, 변경 이력, 동시 수정 충돌 감지, 앱 내부 알림.
 
+## v0.2 이후 추가 기능 (2026-11)
+
+- [방문 점검 준비표](docs/VISIT-PREP.md): 방문 전 자산·계약·미해결 작업과 준비 체크리스트 확인.
+- [자산 변경 이력 비교](docs/ASSET-HISTORY.md): 감사 기록의 변경 전후 값 비교. 적용 전 이력은 값 비교 불가.
+- [문서·보고서 복합 검색](docs/DOCUMENT-SEARCH.md): 고객·관련 기록 종류·등급·날짜 등으로 검색.
+- [가져오기 실패 행 내려받기](docs/IMPORT-FAILURES.md): 오류 행과 사유를 CSV·XLSX로 저장.
+- [주 연락처·연락 우선순위·퇴사일·직책](docs/IMPROVEMENTS-2026-09-05.md): 고객 담당자의 연락 정보를 관리.
+
 공개 저장소의 예제·화면·테스트에는 가상 자료만 사용합니다. 운영 자격증명과 실제 고객 자료는 저장소에 포함하지 않습니다.
 
 ## 개선과 검증
@@ -89,5 +97,10 @@ FILE_SCAN_MODE=test E2E_START_SERVER=1 npm run test:e2e
 - [설치와 운영](docs/DEPLOYMENT.md)
 - [점검 대상 자산 여러 개 선택](docs/INSPECTION-ASSETS.md)
 - [점검·계정 삭제와 부서·직책 관리](docs/RECORD-DELETION.md)
+- [에이전트 팀 운영](docs/AGENT-TEAM.md)
+- [방문 점검 준비표](docs/VISIT-PREP.md)
+- [자산 변경 이력 비교](docs/ASSET-HISTORY.md)
+- [문서·보고서 복합 검색](docs/DOCUMENT-SEARCH.md)
+- [가져오기 실패 행 내려받기](docs/IMPORT-FAILURES.md)
 
 현재 버전은 고객·자산·유지보수 범위입니다. 영업·구매·재고·재무·인사는 후속 확장 대상입니다. 실제 사내 자료 이관, 운영망·인증서 구성과 현장 복구 시험은 해당 환경에서 진행해야 합니다.
