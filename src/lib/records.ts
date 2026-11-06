@@ -132,9 +132,9 @@ export async function listRecords(
     const choice = query.get("expiry")!;
     if (choice === "overdue")
       where.push("e.term='dated' AND e.end_date<CURRENT_DATE");
-    else if (choice === "30")
+    else if (choice === "30" || choice === "90")
       where.push(
-        "e.term='dated' AND e.end_date BETWEEN CURRENT_DATE AND CURRENT_DATE+30",
+        `e.term='dated' AND e.end_date BETWEEN CURRENT_DATE AND CURRENT_DATE+${choice === "30" ? 30 : 90}`,
       );
     else if (["unknown", "perpetual"].includes(choice)) {
       params.push(choice);

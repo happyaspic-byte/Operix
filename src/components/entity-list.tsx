@@ -422,6 +422,7 @@ export function EntityList({ entity }: { entity: string }) {
             >
               <option value="">모든 만료 상태</option>
               <option value="30">30일 이내 만료</option>
+              <option value="90">90일 이내 만료</option>
               <option value="overdue">이미 만료</option>
               <option value="unknown">기간 미확인</option>
               <option value="perpetual">무기한</option>
