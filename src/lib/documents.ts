@@ -23,7 +23,8 @@ import {
   readableClasses,
   requireDocumentAccess,
 } from "./document-policy";
-import { pagination, queryDate } from "./http";
+import { pagination } from "./http";
+import { documentSearchFilters } from "./document-search";
 import { lockBusiness } from "./transactions";
 import { scanBytes } from "./file-scanner";
 import { securityLog } from "./security";
@@ -75,27 +76,7 @@ export async function listDocuments(user: User, q: URLSearchParams) {
     p = pagination(q),
     params: any[] = [readableClasses(user.role)],
     where = ["d.deleted_at IS NULL", "d.classification=ANY($1::text[])"];
-  for (const [key, column] of [
-    ["entity_kind", "d.entity_kind"],
-    ["entity_id", "d.entity_id"],
-    ["classification", "d.classification"],
-  ] as const)
-    if (q.get(key)) {
-      params.push(q.get(key));
-      where.push(`${column}=$${params.length}`);
-    }
-  if (q.get("q")) {
-    params.push("%" + q.get("q")!.slice(0, 150) + "%");
-    where.push(`d.name ILIKE $${params.length}`);
-  }
-  for (const [key, op] of [
-    ["from", ">="],
-    ["to", "<="],
-  ] as const)
-    if (q.get(key)) {
-      params.push(queryDate(q.get(key)!));
-      where.push(`d.created_at::date${op}$${params.length}::date`);
-    }
+  documentSearchFilters(q, "d", params, where);
   const filter = where.join(" AND "),
     [count] = await db.query(
       "SELECT count(*)::int total FROM documents d WHERE " + filter,

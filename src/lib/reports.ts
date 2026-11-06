@@ -5,7 +5,8 @@ import { audit, type User } from "./auth";
 import { todayKST } from "./dates";
 import { AppError, requirePermission } from "./policy";
 import { canReadClass, readableClasses } from "./document-policy";
-import { parseInput, pagination, queryDate } from "./http";
+import { parseInput, pagination } from "./http";
+import { documentSearchFilters } from "./document-search";
 import { getRecord } from "./records";
 import { lockBusiness } from "./transactions";
 export function reportDocumentNumber(id: string, today = todayKST()): string {
@@ -22,23 +23,7 @@ export async function listReports(
   const p = pagination(q),
     values: unknown[] = [readableClasses(user.role)],
     where = ["r.withdrawn_at IS NULL", "r.classification=ANY($1::text[])"];
-  for (const key of ["entity_kind", "entity_id", "audience"])
-    if (q.get(key)) {
-      values.push(q.get(key));
-      where.push(`r.${key}=$${values.length}`);
-    }
-  if (q.get("q")) {
-    values.push("%" + q.get("q")!.slice(0, 150) + "%");
-    where.push(`r.title ILIKE $${values.length}`);
-  }
-  for (const [key, op] of [
-    ["from", ">="],
-    ["to", "<="],
-  ])
-    if (q.get(key)) {
-      values.push(queryDate(q.get(key)!));
-      where.push(`r.created_at::date${op}$${values.length}::date`);
-    }
+  documentSearchFilters(q, "r", values, where);
   const filter = where.join(" AND "),
     [count] = await db.query(
       "SELECT count(*)::int total FROM reports r WHERE " + filter,
