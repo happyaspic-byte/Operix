@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   application:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -107,7 +107,7 @@ jobs:
             playwright-report
           retention-days: 14
   container:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -213,7 +213,8 @@ jobs:
       github.repository == 'happyaspic-byte/Operix' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-latest
+    # ubuntu-26.04(Docker 29, containerd 이미지 저장소)에서는 push 후 pull한 이미지 Id가 검증된 Id와 달라 게시 검증이 실패합니다.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: write
