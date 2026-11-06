@@ -126,7 +126,7 @@ export function Dashboard() {
                   label: "31~90일",
                   value: data.expiry.counts.within90,
                   tone: "info",
-                  href: "/contracts?expiry=90",
+                  href: "/contracts?expiry=31-90",
                 },
                 {
                   label: "만료됨",
