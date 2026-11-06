@@ -1,7 +1,7 @@
 {
-  "image": "ghcr.io/happyaspic-byte/operix@sha256:b5db47bb5c88b3ebeecfb85517a47c738e56cb5476cdda55f1d4578e83fc9db1",
+  "image": "ghcr.io/happyaspic-byte/operix@sha256:3ad32419e6faeb4db822d1c49c1d00c562b2b981ae03c71dfe8f2ec24fba466b",
   "repository": "happyaspic-byte/Operix",
-  "revision": "58d067f5daa699dd6c263dc0a1c4ebbd52ec1c71",
-  "run_id": "42162570247",
+  "revision": "2dcbe2ac6685065e87397da3e02f2f13e1515532",
+  "run_id": "42164465317",
   "schema": 1
 }
