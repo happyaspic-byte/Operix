@@ -1,0 +1,51 @@
+name: 버그 신고
+description: 현장 업무 중 발견한 문제를 제보합니다.
+title: "[버그] "
+body:
+  - type: markdown
+    attributes:
+      value: 실제 고객 정보, 연락처, 자격증명은 입력하지 마세요. 가상 자료를 사용해 주세요.
+  - type: input
+    id: screen
+    attributes:
+      label: 화면 또는 API
+      placeholder: 예) 점검 상세
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: 사용자 역할
+      options:
+        - 관리자
+        - 업무 관리자
+        - 기술지원
+        - 영업
+        - 조회 전용
+        - 확인되지 않음
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 재현 절차
+      description: 가상 자료와 함께 순서대로 작성해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대 동작
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 실제 동작
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 환경과 발생 시각
+      description: 브라우저·기기·버전·시간대 등 개인정보가 없는 정보

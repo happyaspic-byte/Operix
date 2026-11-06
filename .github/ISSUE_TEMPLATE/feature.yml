@@ -1,0 +1,33 @@
+name: 기능 제안
+description: 현장 서비스 업무 개선을 제안합니다.
+title: "[기능] "
+body:
+  - type: markdown
+    attributes:
+      value: 실제 고객 정보, 연락처, 자격증명은 입력하지 마세요. 가상 자료를 사용해 주세요.
+  - type: textarea
+    id: workflow
+    attributes:
+      label: 업무 흐름과 문제
+      description: 현재 현장 업무 절차와 개선이 필요한 상황을 적어 주세요.
+    validations:
+      required: true
+  - type: input
+    id: users
+    attributes:
+      label: 사용자와 역할
+      placeholder: 예) 현장 기술지원 담당자
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 확인 기준
+      description: 기능이 완료되었을 때 관찰할 수 있는 결과를 적어 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: 권한·개인정보·운영 제약과 회사 결정
+      description: 고객 공개 여부, 승인 절차, 모바일 환경 등 알려진 제약을 적어 주세요.
