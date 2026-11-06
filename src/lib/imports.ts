@@ -148,9 +148,24 @@ export async function previewImport(
           input[field.key] = value;
         }
       }
+      // ALM exports placeholder serials such as "|" for units without one;
+      // they must not become a shared identity across rows or exports.
+      if (alm && input.serial && !/[\p{L}\p{N}]/u.test(String(input.serial))) {
+        warnings.push(
+          `의미 없는 ALM 시리얼 "${input.serial}"은 비우고 표시 이름의 ALM ID를 자산 ID로 사용합니다.`,
+        );
+        input.serial = "";
+      }
       const fallbackTag = alm && !input.asset_tag;
+      // ALM display names read "<ALM ID> - <product>" (e.g. "ee-51066 - everRun
+      // Express"); that ID is the stable ALM key. Other names carry no ID.
+      const almId = alm
+        ? (/^([A-Za-z0-9][A-Za-z0-9-]*) - /.exec(
+            String(source.display_name ?? "").trim(),
+          )?.[1] ?? "")
+        : "";
       if (alm) {
-        if (!input.asset_tag && !input.serial)
+        if (!input.asset_tag && !input.serial && !almId)
           throw new AppError(
             400,
             "ALM 시리얼 또는 명시적 자산 ID가 필요합니다.",
@@ -162,21 +177,21 @@ export async function previewImport(
           seenSerials.add(serialKey);
         }
       }
-      if (fallbackTag) {
-        if (!input.serial)
-          throw new AppError(
-            400,
-            "ALM 시리얼 또는 명시적 자산 ID가 필요합니다.",
-          );
-        input.asset_tag = input.serial;
-      }
+      if (fallbackTag) input.asset_tag = input.serial || almId;
       if (alm && mapping.product === "u_asset_type") {
         const products: Record<string, string> = {
           "everRun Enterprise": "everRun",
           ztCEdge: "ztC Edge",
           windows: "Server",
         };
-        const converted = products[input.product];
+        // ALM types ztC Endurance units by their guest OS ("windows"); the
+        // product line named in display_name is the reliable source.
+        const named = ["ztC Endurance", "ztC Edge", "everRun"].find((line) =>
+          String(source.display_name ?? "")
+            .toLowerCase()
+            .includes(line.toLowerCase()),
+        );
+        const converted = named || products[input.product];
         if (converted) {
           warnings.push(
             `원본 자산 유형 ${input.product} → 제품 ${converted} (원본은 메모에 보존)`,
@@ -277,6 +292,21 @@ export async function previewImport(
           "SELECT * FROM contracts WHERE customer_id=$1 AND lower(name)=lower($2) AND kind=$3",
           [input.customer_id, input.name, input.kind],
         );
+      // Assets registered by their ALM ID (e.g. ztC Edge pairs whose ALM serial
+      // lists both nodes) must be updated, not duplicated.
+      if (
+        kind === "assets" &&
+        fallbackTag &&
+        !matches.length &&
+        almId &&
+        almId.toLowerCase() !== String(input.asset_tag).toLowerCase()
+      ) {
+        matches = await db.query(
+          "SELECT * FROM assets WHERE lower(asset_tag)=lower($1)",
+          [almId],
+        );
+        if (matches.length === 1) input.asset_tag = matches[0].asset_tag;
+      }
       if (alm && input.serial) {
         const serialMatches = await db.query(
           "SELECT * FROM assets WHERE lower(serial)=lower($1)",
@@ -334,6 +364,17 @@ export async function previewImport(
           "기존 자산의 사업장은 ALM 가져오기로 변경할 수 없습니다.",
         );
       if (alm && matches.length && !input.serial) delete input.serial;
+      if (
+        alm &&
+        matches.length &&
+        mapping.name === "display_name" &&
+        matches[0].name !== input.name
+      ) {
+        warnings.push(
+          `기존 자산명 "${matches[0].name}"을 유지합니다. ALM 표시 이름은 메모에 보존됩니다.`,
+        );
+        delete input.name;
+      }
       if (matches.length > 1)
         throw new AppError(
           400,
