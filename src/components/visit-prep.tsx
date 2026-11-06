@@ -40,13 +40,16 @@ export function VisitPrep({ id }: { id: string }) {
   async function toggle(item: Item) {
     setBusy((current) => new Set(current).add(item.key));
     setError("");
-    setData((current) =>
-      current && {
-        ...current,
-        checks: current.checks.map((check) =>
-          check.key === item.key ? { ...check, checked: !item.checked } : check,
-        ),
-      },
+    setData(
+      (current) =>
+        current && {
+          ...current,
+          checks: current.checks.map((check) =>
+            check.key === item.key
+              ? { ...check, checked: !item.checked }
+              : check,
+          ),
+        },
     );
     try {
       const result = await api("/api/visit-prep/" + encodeURIComponent(id), {
@@ -67,13 +70,14 @@ export function VisitPrep({ id }: { id: string }) {
           : current,
       );
     } catch (e) {
-      setData((current) =>
-        current && {
-          ...current,
-          checks: current.checks.map((check) =>
-            check.key === item.key ? item : check,
-          ),
-        },
+      setData(
+        (current) =>
+          current && {
+            ...current,
+            checks: current.checks.map((check) =>
+              check.key === item.key ? item : check,
+            ),
+          },
       );
       setError(e instanceof Error ? e.message : "저장하지 못했습니다.");
     } finally {
